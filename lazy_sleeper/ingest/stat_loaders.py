@@ -2,6 +2,10 @@
 
 Pure transforms (`sleeper_stat_rows`, `espn_stat_rows`) are separated from the DB writes so they
 can be unit-tested on fixtures without a database.
+
+Rows with no stat-level content (`stats == {}` — unprojected players, did-not-play weeks) are
+dropped: they are ~65% of raw provider rows and carry nothing the scoring engine can use. Sleeper
+ADP for such players is still captured in core.adp.
 """
 
 from __future__ import annotations
@@ -100,6 +104,18 @@ def sleeper_stat_rows(
             for k, v in stats.items()
             if not k.startswith("adp_") and not k.startswith("pts_") and k != "gp" and v is not None
         }
+        if week is None and any(stats.get(k) is not None for k in _ADP_FIELDS):
+            adp_rows.append(
+                {
+                    "snapshot_id": snapshot.id,
+                    "season": season,
+                    "sleeper_id": pid,
+                    "position": position,
+                    **{k: _f(stats.get(k)) for k in _ADP_FIELDS},
+                }
+            )
+        if not core_stats:
+            continue  # no stat-level content (unprojected player) — ADP above is all it carries
         stat_rows.append(
             {
                 "snapshot_id": snapshot.id,
@@ -116,16 +132,6 @@ def sleeper_stat_rows(
                 "stats": core_stats,
             }
         )
-        if week is None and any(stats.get(k) is not None for k in _ADP_FIELDS):
-            adp_rows.append(
-                {
-                    "snapshot_id": snapshot.id,
-                    "season": season,
-                    "sleeper_id": pid,
-                    "position": position,
-                    **{k: _f(stats.get(k)) for k in _ADP_FIELDS},
-                }
-            )
     return stat_rows, adp_rows
 
 
@@ -156,6 +162,8 @@ def espn_stat_rows(
             seen.add(key)
             stats = decode_stats(s.get("stats") or {})
             gp = stats.pop("gp", None)
+            if not stats:
+                continue  # unprojected / did-not-play: nothing to score
             rows.append(
                 {
                     "snapshot_id": snapshot.id,

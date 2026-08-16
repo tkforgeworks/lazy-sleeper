@@ -51,7 +51,9 @@ def test_position_and_team_tables() -> None:
 def test_sleeper_weekly_rows(sleeper_proj_payload: bytes) -> None:
     snap = _snap("sleeper", "projections_week", 2025, 1)
     stat_rows, adp_rows = sleeper_stat_rows(sleeper_proj_payload, snap)
-    assert len(stat_rows) == 5
+    payload_rows = json.loads(sleeper_proj_payload)
+    non_empty = [e for e in payload_rows if e.get("stats")]
+    assert len(stat_rows) == len(non_empty)  # empty-stat rows are dropped
     r = stat_rows[0]
     assert r["source"] == "sleeper" and r["category"] == "proj"
     assert r["season"] == 2025 and r["week"] == 1
@@ -86,6 +88,14 @@ def test_sleeper_season_rows_emit_adp() -> None:
             "player": {"position": "DEF"},
             "stats": {"sack": 40, "pts_allow_0": 1},
         },
+        {
+            "player_id": "9999",
+            "season": "2026",
+            "week": None,
+            "team": None,
+            "player": {"position": "WR"},
+            "stats": {"adp_ppr": 250.0, "gp": 0},  # unprojected: ADP only, no stat line
+        },
     ]
     snap = _snap("sleeper", "projections_season", 2026, None)
     stat_rows, adp_rows = sleeper_stat_rows(json.dumps(entries).encode(), snap)
@@ -93,11 +103,9 @@ def test_sleeper_season_rows_emit_adp() -> None:
     assert stat_rows[0]["gp"] == 17.0 and stat_rows[0]["provider_points"] == 320.1
     assert stat_rows[0]["week"] is None
     assert stat_rows[1]["position"] == "DEF" and stat_rows[1]["sleeper_id"] == "KC"
-    assert (
-        len(adp_rows) == 1
-        and adp_rows[0]["adp_ppr"] == 45.2
-        and adp_rows[0]["sleeper_id"] == "4046"
-    )
+    assert len(stat_rows) == 2  # the unprojected player produced no stat line
+    assert [a["sleeper_id"] for a in adp_rows] == ["4046", "9999"]
+    assert adp_rows[0]["adp_ppr"] == 45.2 and adp_rows[1]["adp_ppr"] == 250.0
 
 
 # --- ESPN transform -------------------------------------------------------------------------
@@ -114,6 +122,7 @@ def test_espn_rows_from_fixture(espn_kona_payload: bytes) -> None:
     assert cats <= {"proj", "actual"}
     # every row has decoded (Sleeper-vocab) keys only
     for r in rows:
+        assert r["stats"], "empty stat lines must be dropped"
         assert all(not k.isdigit() for k in r["stats"])
         assert r["snapshot_id"] == 9
     # season rows have week None; weekly rows carry scoringPeriodId
