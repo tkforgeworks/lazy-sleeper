@@ -20,3 +20,18 @@ npm-debug.log*
 
 # Claude Code local settings (machine-specific permissions)
 .claude/settings.local.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local snapshot archive (raw payloads; mirrored to Supabase Storage)
+data/

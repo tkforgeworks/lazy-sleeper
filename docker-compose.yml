@@ -1,0 +1,21 @@
+# Local dev database. Schema is plain Postgres so the same migrations run on Supabase.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: lazy-sleeper-db
+    environment:
+      POSTGRES_USER: lazysleeper
+      POSTGRES_PASSWORD: lazysleeper
+      POSTGRES_DB: lazysleeper
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lazysleeper"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
