@@ -1,0 +1,22 @@
+# Data pulls — keep the script, ignore fetched output (100MB+ of raw JSON)
+data_pulls/ff-projections-*/
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Claude Code local settings (machine-specific permissions)
+.claude/settings.local.json
