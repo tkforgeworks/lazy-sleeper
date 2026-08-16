@@ -1,0 +1,227 @@
+"""`ls` command-line entrypoint (installed via pyproject [project.scripts]).
+
+ls pull daily                 # players + 2026 season projections + ESPN 2026 + crosswalk
+ls pull projections 2025 --week 3
+ls pull espn 2026
+ls pull league                # league, users, rosters, draft, draft picks
+ls pull picks                 # just draft picks (poll target for draft night)
+ls pull nflverse 2025         # weekly stats + snap counts
+ls backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
+ls load players               # latest valid players snapshot → core.players
+ls load crosswalk
+ls db upgrade                 # alembic upgrade head
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+
+import typer
+
+from lazy_sleeper.config import Settings, get_settings
+from lazy_sleeper.db.session import make_engine, make_session_factory, session_scope
+from lazy_sleeper.ingest.espn import EspnClient
+from lazy_sleeper.ingest.http import HttpClient
+from lazy_sleeper.ingest.loaders import load_crosswalk, load_players
+from lazy_sleeper.ingest.nflverse import NflverseClient
+from lazy_sleeper.ingest.pipeline import Puller
+from lazy_sleeper.ingest.sleeper import SleeperClient
+from lazy_sleeper.ingest.snapshots import (
+    SnapshotKey,
+    SnapshotRepository,
+    SnapshotStore,
+    SupabaseStorage,
+)
+
+app = typer.Typer(no_args_is_help=True, add_completion=False)
+pull_app = typer.Typer(no_args_is_help=True)
+load_app = typer.Typer(no_args_is_help=True)
+db_app = typer.Typer(no_args_is_help=True)
+app.add_typer(pull_app, name="pull", help="Fetch external data into dated snapshots")
+app.add_typer(load_app, name="load", help="Load latest snapshots into core tables")
+app.add_typer(db_app, name="db", help="Database migrations")
+
+
+@app.callback()
+def _root(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def _store(settings: Settings) -> SnapshotStore:
+    remote = None
+    if settings.supabase_enabled:
+        remote = SupabaseStorage(
+            settings.supabase_url or "",
+            settings.supabase_service_key or "",
+            settings.supabase_bucket,
+        )
+    return SnapshotStore(settings.snapshot_dir, remote)
+
+
+class _Ctx:
+    """Wires collaborators for one CLI invocation."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+        self.http = HttpClient(
+            timeout_s=self.settings.http_timeout_s,
+            retries=self.settings.http_retries,
+            delay_ms=self.settings.http_delay_ms,
+        )
+        self.engine = make_engine(self.settings)
+        self.sessions = make_session_factory(self.engine)
+        self.store = _store(self.settings)
+
+    def puller(self, session) -> Puller:  # noqa: ANN001
+        return Puller(
+            session=session,
+            store=self.store,
+            sleeper=SleeperClient(self.http),
+            espn=EspnClient(self.http),
+            nflverse=NflverseClient(self.http),
+        )
+
+
+# --- pull ------------------------------------------------------------------
+@pull_app.command("projections")
+def pull_projections(season: int, week: int | None = typer.Option(None)) -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_sleeper_projections(season, week)
+
+
+@pull_app.command("stats")
+def pull_stats(season: int, week: int | None = typer.Option(None)) -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_sleeper_stats(season, week)
+
+
+@pull_app.command("players")
+def pull_players() -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_sleeper_players()
+
+
+@pull_app.command("espn")
+def pull_espn(season: int) -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_espn_kona(season)
+
+
+@pull_app.command("league")
+def pull_league() -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_league_state(
+            ctx.settings.sleeper_league_id, ctx.settings.sleeper_draft_id
+        )
+
+
+@pull_app.command("picks")
+def pull_picks() -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_draft_picks(ctx.settings.sleeper_draft_id)
+
+
+@pull_app.command("nflverse")
+def pull_nflverse(
+    season: int, crosswalk: bool = typer.Option(False, help="Also refresh the crosswalk")
+) -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        p = ctx.puller(s)
+        p.pull_nflverse_stats(season)
+        p.pull_nflverse_snaps(season)
+        if crosswalk:
+            p.pull_crosswalk()
+
+
+@pull_app.command("crosswalk")
+def pull_crosswalk() -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        ctx.puller(s).pull_crosswalk()
+
+
+@pull_app.command("daily")
+def pull_daily(season: int = 2026) -> None:
+    """The daily pre-draft job: players, season projections/ADP, ESPN, crosswalk."""
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        p = ctx.puller(s)
+        p.pull_sleeper_players()
+        p.pull_sleeper_projections(season)
+        p.pull_espn_kona(season)
+        p.pull_crosswalk()
+
+
+# --- backfill --------------------------------------------------------------
+@app.command("backfill")
+def backfill(
+    directory: Path,
+    pulled_at: str = typer.Option(
+        ..., help="ISO date/datetime the files were originally fetched, e.g. 2026-08-16"
+    ),
+) -> None:
+    """Import a data_pull_script.ps1 output directory as snapshots."""
+    ts = datetime.fromisoformat(pulled_at)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rows = ctx.puller(s).backfill_dir(directory, ts)
+    typer.echo(f"backfilled {len(rows)} snapshots from {directory}")
+
+
+# --- load ------------------------------------------------------------------
+@load_app.command("players")
+def load_players_cmd() -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        snap = SnapshotRepository(s).latest(SnapshotKey("sleeper", "players"))
+        if snap is None:
+            raise typer.BadParameter("no valid players snapshot; run `ls pull players` first")
+        n = load_players(s, ctx.store.read(snap.storage_path), snap.id)
+    typer.echo(f"loaded {n} players from snapshot {snap.id}")
+
+
+@load_app.command("crosswalk")
+def load_crosswalk_cmd() -> None:
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        snap = SnapshotRepository(s).latest(SnapshotKey("nflverse", "crosswalk"))
+        if snap is None:
+            raise typer.BadParameter("no valid crosswalk snapshot; run `ls pull crosswalk` first")
+        n = load_crosswalk(s, ctx.store.read(snap.storage_path), snap.id)
+    typer.echo(f"loaded {n} crosswalk rows from snapshot {snap.id}")
+
+
+# --- db --------------------------------------------------------------------
+@db_app.command("upgrade")
+def db_upgrade(revision: str = "head") -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    command.upgrade(Config("alembic.ini"), revision)
+
+
+@db_app.command("downgrade")
+def db_downgrade(revision: str = "-1") -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    command.downgrade(Config("alembic.ini"), revision)
+
+
+if __name__ == "__main__":
+    app()

@@ -1,0 +1,70 @@
+{
+ "4046": {
+  "player_id": "4046",
+  "first_name": "Patrick",
+  "last_name": "Mahomes",
+  "full_name": "Patrick Mahomes",
+  "position": "QB",
+  "team": "KC",
+  "status": "Active",
+  "injury_status": null,
+  "depth_chart_order": 1,
+  "search_rank": 12,
+  "years_exp": 9,
+  "age": 30,
+  "team_changed_at": null,
+  "sportradar_id": "11cad59d-90dd-449c-a839-dddaba4fe16c",
+  "espn_id": "3139477",
+  "gsis_id": "00-0033873",
+  "yahoo_id": "30123",
+  "active": true,
+  "fantasy_positions": [
+   "QB"
+  ]
+ },
+ "6794": {
+  "player_id": "6794",
+  "first_name": "Justin",
+  "last_name": "Jefferson",
+  "full_name": "Justin Jefferson",
+  "position": "WR",
+  "team": "MIN",
+  "status": "Active",
+  "injury_status": null,
+  "depth_chart_order": 1,
+  "search_rank": 3,
+  "years_exp": 6,
+  "age": 27,
+  "team_changed_at": null,
+  "sportradar_id": "a2ba0c96-8f2c-4d5f-9d63-8f4b7c8f5b8b",
+  "espn_id": "4262921",
+  "gsis_id": "00-0036322",
+  "yahoo_id": null,
+  "active": true,
+  "fantasy_positions": [
+   "WR"
+  ]
+ },
+ "KC": {
+  "player_id": "KC",
+  "first_name": "Kansas City",
+  "last_name": "Chiefs",
+  "position": "DEF",
+  "team": "KC",
+  "status": null,
+  "injury_status": null,
+  "depth_chart_order": null,
+  "search_rank": null,
+  "years_exp": 0,
+  "age": null,
+  "team_changed_at": null,
+  "sportradar_id": null,
+  "espn_id": null,
+  "gsis_id": null,
+  "yahoo_id": null,
+  "active": true,
+  "fantasy_positions": [
+   "DEF"
+  ]
+ }
+}
