@@ -9,6 +9,8 @@ lazy pull nflverse 2025         # weekly stats + snap counts
 lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
 lazy load players               # latest valid players snapshot → core.players
 lazy load crosswalk
+lazy load stats                 # valid, not-yet-loaded proj/actual snapshots → core.stat_lines/adp
+lazy load stats --source sleeper --season 2026   # only matching snapshots
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -33,6 +35,12 @@ from lazy_sleeper.ingest.snapshots import (
     SnapshotRepository,
     SnapshotStore,
     SupabaseStorage,
+)
+from lazy_sleeper.ingest.stat_loaders import (
+    STAT_KINDS,
+    SleeperIdResolver,
+    load_stat_snapshot,
+    loaded_snapshot_ids,
 )
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -204,6 +212,58 @@ def load_crosswalk_cmd() -> None:
             raise typer.BadParameter("no valid crosswalk snapshot; run `lazy pull crosswalk` first")
         n = load_crosswalk(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} crosswalk rows from snapshot {snap.id}")
+
+
+@load_app.command("stats")
+def load_stats_cmd(
+    source: str | None = typer.Option(None, help="sleeper | espn"),
+    season: int | None = typer.Option(None),
+    week: int | None = typer.Option(None),
+    latest_only: bool = typer.Option(
+        False, help="Only the latest snapshot per (source, kind, season, week)"
+    ),
+    reload: bool = typer.Option(False, help="Re-load snapshots already present in core.stat_lines"),
+) -> None:
+    """Load Sleeper projections/stats and ESPN kona snapshots into core.stat_lines + core.adp."""
+    from sqlalchemy import select
+
+    from lazy_sleeper.db.models import Snapshot
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        stmt = select(Snapshot).where(Snapshot.valid.is_(True), Snapshot.kind.in_(STAT_KINDS))
+        if source:
+            stmt = stmt.where(Snapshot.source == source)
+        if season is not None:
+            stmt = stmt.where(Snapshot.season == season)
+        if week is not None:
+            stmt = stmt.where(Snapshot.week == week)
+        snaps = list(s.scalars(stmt.order_by(Snapshot.pulled_at)))
+        if latest_only:
+            latest: dict[tuple, Snapshot] = {}
+            for snap in snaps:
+                latest[(snap.source, snap.kind, snap.season, snap.week)] = snap
+            snaps = list(latest.values())
+        already = set() if reload else loaded_snapshot_ids(s)
+        resolver = SleeperIdResolver.from_session(s)
+        total_stats = total_adp = done = 0
+        for snap in snaps:
+            if snap.id in already:
+                continue
+            n_stats, n_adp = load_stat_snapshot(
+                s, snap, ctx.store.read(snap.storage_path), resolver
+            )
+            done += 1
+            total_stats += n_stats
+            total_adp += n_adp
+            typer.echo(
+                f"  {snap.source}/{snap.kind} s={snap.season} w={snap.week} -> "
+                f"{n_stats} stat lines, {n_adp} adp"
+            )
+    typer.echo(
+        f"loaded {done} snapshots: {total_stats} stat lines, {total_adp} adp rows"
+        + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
+    )
 
 
 # --- db --------------------------------------------------------------------

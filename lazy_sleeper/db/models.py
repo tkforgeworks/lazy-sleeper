@@ -18,6 +18,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -105,3 +106,64 @@ class Crosswalk(Base):
     position: Mapped[str | None] = mapped_column(String(8))
     snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raw.snapshots.id"))
     loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class StatLine(Base):
+    """One stat line (projection or actual) for one player, one season/week, from one snapshot.
+
+    `stats` is a JSONB dict in the Sleeper stat vocabulary (which is also the vocabulary of the
+    league's `scoring_settings` map) — ESPN stat ids are decoded into it on load. Season totals
+    have week NULL. Rows are per-snapshot so provider revisions are visible over time.
+    """
+
+    __tablename__ = "stat_lines"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_id",
+            "source_player_id",
+            "category",
+            "season",
+            "week",
+            name="uq_stat_line_identity",
+            postgresql_nulls_not_distinct=True,
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("raw.snapshots.id"), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)  # sleeper | espn | nflverse
+    category: Mapped[str] = mapped_column(String(8), nullable=False)  # proj | actual
+    season: Mapped[int] = mapped_column(Integer, nullable=False)
+    week: Mapped[int | None] = mapped_column(Integer)  # NULL = season total
+    source_player_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    sleeper_id: Mapped[str | None] = mapped_column(String(16), index=True)  # resolved; NULL if not
+    position: Mapped[str | None] = mapped_column(String(8))
+    team: Mapped[str | None] = mapped_column(String(8))
+    gp: Mapped[float | None] = mapped_column(Float)
+    provider_points: Mapped[float | None] = mapped_column(Float)  # provider PPR pts, x-check
+    stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class Adp(Base):
+    """Sleeper platform ADP per season snapshot. Market data, kept apart from projections."""
+
+    __tablename__ = "adp"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "sleeper_id", name="uq_adp_identity"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("raw.snapshots.id"), nullable=False)
+    season: Mapped[int] = mapped_column(Integer, nullable=False)
+    sleeper_id: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    position: Mapped[str | None] = mapped_column(String(8))
+    adp_ppr: Mapped[float | None] = mapped_column(Float)
+    adp_half_ppr: Mapped[float | None] = mapped_column(Float)
+    adp_std: Mapped[float | None] = mapped_column(Float)
+    adp_2qb: Mapped[float | None] = mapped_column(Float)
+    adp_dynasty: Mapped[float | None] = mapped_column(Float)
+    adp_dynasty_ppr: Mapped[float | None] = mapped_column(Float)
+    adp_rookie: Mapped[float | None] = mapped_column(Float)
+    adp_idp: Mapped[float | None] = mapped_column(Float)
