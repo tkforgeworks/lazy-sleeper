@@ -56,14 +56,14 @@ class RemoteStorage(Protocol):
 
 
 class SupabaseStorage:
-    """Minimal Supabase Storage REST client (no SDK). Service-role key; upsert disabled."""
+    """Minimal Supabase Storage REST client (no SDK). sb_secret key; upsert disabled."""
 
-    def __init__(self, url: str, service_key: str, bucket: str, *, timeout_s: float = 60.0) -> None:
+    def __init__(self, url: str, secret_key: str, bucket: str, *, timeout_s: float = 60.0) -> None:
         self._base = url.rstrip("/")
         self._bucket = bucket
         self._client = httpx.Client(
             timeout=timeout_s,
-            headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+            headers={"Authorization": f"Bearer {secret_key}", "apikey": secret_key},
         )
 
     def upload(self, path: str, data: bytes, content_type: str = "application/gzip") -> str:

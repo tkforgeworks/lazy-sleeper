@@ -58,7 +58,7 @@ def _store(settings: Settings) -> SnapshotStore:
     if settings.supabase_enabled:
         remote = SupabaseStorage(
             settings.supabase_url or "",
-            settings.supabase_service_key or "",
+            settings.supabase_secret_key or "",
             settings.supabase_bucket,
         )
     return SnapshotStore(settings.snapshot_dir, remote)

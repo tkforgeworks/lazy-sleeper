@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     snapshot_dir: Path = Path("./data/snapshots")
 
     supabase_url: str | None = None
-    supabase_service_key: str | None = None
+    supabase_secret_key: str | None = None  # sb_secret_... (legacy service_role also works)
     supabase_bucket: str = "raw-snapshots"
 
     sleeper_league_id: str = "1392685475625443328"
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     @property
     def supabase_enabled(self) -> bool:
-        return bool(self.supabase_url and self.supabase_service_key)
+        return bool(self.supabase_url and self.supabase_secret_key)
 
 
 @lru_cache
