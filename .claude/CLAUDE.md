@@ -13,7 +13,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Stack (decided 2026-08-16)
 
-- Python ≥3.12, hatchling, ruff (line 100), pytest. CLI entrypoint `ls` (`lazy_sleeper.jobs.cli`).
+- Python ≥3.12, hatchling, ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid shadowing the shell command.
 - Postgres via SQLAlchemy 2 + Alembic. Local: `docker compose up -d` (port 5433). Hosted target: Supabase
   free tier (Pro is an accepted fallback). Schemas `raw` / `core` / `derived`; plain Postgres only, no
   local-only extensions — migrations must run unchanged on Supabase.

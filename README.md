@@ -21,14 +21,14 @@ python -m venv .venv && . .venv/Scripts/activate      # or source .venv/bin/acti
 pip install -e ".[dev]"
 cp .env.example .env                                   # local Docker Postgres by default
 docker compose up -d                                   # Postgres 16 on localhost:5433
-ls db upgrade                                          # alembic upgrade head
+lazy db upgrade                                          # alembic upgrade head
 
-ls pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
-ls load players && ls load crosswalk                   # → core.players / core.crosswalk
+lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
+lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
-`ls --help` lists every command (`pull projections 2025 --week 3`, `pull league`, `pull picks`,
+`lazy --help` lists every command (`pull projections 2025 --week 3`, `pull league`, `pull picks`,
 `pull nflverse 2025`, `backfill <dir> --pulled-at <date>`, ...).
 
 ## How data flows

@@ -1,15 +1,15 @@
-"""`ls` command-line entrypoint (installed via pyproject [project.scripts]).
+"""`lazy` command-line entrypoint (installed via pyproject [project.scripts]).
 
-ls pull daily                 # players + 2026 season projections + ESPN 2026 + crosswalk
-ls pull projections 2025 --week 3
-ls pull espn 2026
-ls pull league                # league, users, rosters, draft, draft picks
-ls pull picks                 # just draft picks (poll target for draft night)
-ls pull nflverse 2025         # weekly stats + snap counts
-ls backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
-ls load players               # latest valid players snapshot → core.players
-ls load crosswalk
-ls db upgrade                 # alembic upgrade head
+lazy pull daily                 # players + 2026 season projections + ESPN 2026 + crosswalk
+lazy pull projections 2025 --week 3
+lazy pull espn 2026
+lazy pull league                # league, users, rosters, draft, draft picks
+lazy pull picks                 # just draft picks (poll target for draft night)
+lazy pull nflverse 2025         # weekly stats + snap counts
+lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
+lazy load players               # latest valid players snapshot → core.players
+lazy load crosswalk
+lazy db upgrade                 # alembic upgrade head
 """
 
 from __future__ import annotations
@@ -190,7 +190,7 @@ def load_players_cmd() -> None:
     with session_scope(ctx.sessions) as s:
         snap = SnapshotRepository(s).latest(SnapshotKey("sleeper", "players"))
         if snap is None:
-            raise typer.BadParameter("no valid players snapshot; run `ls pull players` first")
+            raise typer.BadParameter("no valid players snapshot; run `lazy pull players` first")
         n = load_players(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} players from snapshot {snap.id}")
 
@@ -201,7 +201,7 @@ def load_crosswalk_cmd() -> None:
     with session_scope(ctx.sessions) as s:
         snap = SnapshotRepository(s).latest(SnapshotKey("nflverse", "crosswalk"))
         if snap is None:
-            raise typer.BadParameter("no valid crosswalk snapshot; run `ls pull crosswalk` first")
+            raise typer.BadParameter("no valid crosswalk snapshot; run `lazy pull crosswalk` first")
         n = load_crosswalk(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} crosswalk rows from snapshot {snap.id}")
 
