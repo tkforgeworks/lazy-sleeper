@@ -240,3 +240,23 @@ Flutter app repo/skeleton starts in parallel once `/board` exists (M3), not in M
 ### 7.7 Remaining open questions (non-blocking)
 
 Carried from §5: OQ-6 hours budget, OQ-7 draft order timing, OQ-8 mock draft, OQ-9 in-season host, OQ-10 forge-digest Resend reuse, OQ-12 Jira conventions (sprints vs Kanban).
+
+---
+
+## 8. Jira key map (created 2026-08-16)
+
+Project **LS** · fix versions `0.1.0` = draft-2026, `0.2.0` = season-2026, `1.0.0` = production · layers as labels.
+
+| Epic | Key | Stories |
+| --- | --- | --- |
+| E1 Repo & tooling bootstrap (remaining) | LS-1 | LS-10 ruleset PATCH · LS-11 Supabase bucket + docs · LS-12 `ls sync` · LS-13 backup 08-16 archive |
+| E2 Ingestion & snapshot archive | LS-2 | LS-14 projections/ADP → core · LS-15 nflverse actuals/snaps/kicking/xFP → core · LS-16 draft picks/rosters → core · LS-17 daily pull scheduler |
+| E3 Scoring engine & join spine | LS-3 | LS-18 QB/RB/WR/TE scoring · LS-19 K distance mix · LS-20 DEF scoring + streaming rank · LS-21 parity test · LS-22 crosswalk/DST join verify |
+| E4 Benchmark scoreboard | LS-4 | LS-23 season scoreboard · LS-24 weekly scoreboard · LS-25 blend weights + provider abstraction |
+| E5 2026 draft board | LS-5 | LS-26 baselines · LS-27 flex-aware VORP · LS-28 tiers/cliffs · LS-29 ADP delta/disagreement · LS-30 `/board` + daily regen |
+| E6 Live draft companion | LS-6 | LS-31 pick poller · LS-32 draft-state model · LS-33 survival + runs · LS-34 recompute ≤120 s · LS-35 `/draft/{id}/state` · LS-36 mock-draft dry run + replay · LS-37 HTML fallback · LS-38 Tailscale · LS-39 Flutter read-only view |
+| E7 ForgeModel v0 | LS-7 | LS-40 EWMA/shrinkage · LS-41 TD regression + modifiers · LS-42 durability + knobs · LS-43 backtest + ensemble |
+| E8 In-season assistant (0.2.0) | LS-8 | LS-44 RoS waivers · LS-45 FAAB · LS-46 floor/ceiling · LS-47 usage alerts · LS-48 wk 15–17 weighting · LS-49 scheduler · LS-50 Resend digests |
+| E9 Productionization (1.0.0) | LS-9 | — |
+
+Suggested order: LS-13 → LS-11/12 → LS-14/15 → LS-18–22 → LS-23–25 → LS-26–30 → LS-16 → LS-31–38 → LS-40–43 (fill-in) → LS-39.

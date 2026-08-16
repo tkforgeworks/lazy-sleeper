@@ -47,5 +47,6 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   self-merge OK. CI job name is `ci` (`.github/workflows/ci.yml`) — **once it has reported on a PR, PATCH the
   ruleset to require it** (see org doc "Updating an existing ruleset"). Not yet done.
 - Commit subjects → release notes: `LS-N: Imperative summary`; bug fixes `LS-N: Fix ...`. Jira project
-  "Lazy Sleeper", key `LS` (tickets not yet drafted — epics E1–E9 in analysis doc §4).
+  "Lazy Sleeper", key `LS`. Epics LS-1..9 (E1..E9), stories LS-10..50 — key map in analysis doc §8.
+  Fix versions: 0.1.0 draft / 0.2.0 season / 1.0.0 production. Layers are labels (no components).
 - Org shared standards (`tkforgeworks/.github`) have TS/Electron CI only; this repo hand-rolls Python CI.
