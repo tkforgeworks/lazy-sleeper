@@ -30,6 +30,9 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   `players`, `crosswalk`, `projections` (per-snapshot *vintages*), `actuals` (*facts*: unique per
   source/season/week/player, latest wins), `adp` (Sleeper market data per season snapshot). Projections and
   actuals share the `stats` JSONB column in Sleeper vocabulary; `week` NULL = season; empty rows dropped.
+  Also `snap_counts` (nflverse, fantasy positions) and `expected_points` (ffverse xFP, `ep` JSONB).
+- nflverse column → Sleeper key map lives in `ingest/nflverse_loaders.py`; nflverse uses `LA` for the Rams
+  (Sleeper `LAR`) and `NA` for nulls/unattributed player ids. nflverse `fantasy_points_ppr` excludes kicking.
 - ESPN stat ids → Sleeper keys via `ingest/espn_stats.py` (empirically verified 2026-08-16). Where ESPN buckets
   don't align (K <40 yd; DEF pts-allowed 14-17/18-21/22-27/35-45/46+) the ESPN-native key is kept, not merged.
 - ESPN espn_id → sleeper_id via crosswalk (authoritative) then `core.players.espn_id`; DEF via proTeamId → team abbr.

@@ -199,3 +199,57 @@ class Adp(Base):
     adp_dynasty_ppr: Mapped[float | None] = mapped_column(Float)
     adp_rookie: Mapped[float | None] = mapped_column(Float)
     adp_idp: Mapped[float | None] = mapped_column(Float)
+
+
+class SnapCount(Base):
+    """nflverse snap counts — one row per player-game (REG season), latest load wins."""
+
+    __tablename__ = "snap_counts"
+    __table_args__ = (
+        UniqueConstraint("season", "week", "pfr_player_id", name="uq_snap_count_identity"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("raw.snapshots.id"), nullable=False)
+    season: Mapped[int] = mapped_column(Integer, nullable=False)
+    week: Mapped[int] = mapped_column(Integer, nullable=False)
+    pfr_player_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    sleeper_id: Mapped[str | None] = mapped_column(String(16), index=True)
+    player: Mapped[str | None] = mapped_column(String(128))
+    position: Mapped[str | None] = mapped_column(String(8))
+    team: Mapped[str | None] = mapped_column(String(8))
+    opponent: Mapped[str | None] = mapped_column(String(8))
+    offense_snaps: Mapped[int | None] = mapped_column(Integer)
+    offense_pct: Mapped[float | None] = mapped_column(Float)
+    defense_snaps: Mapped[int | None] = mapped_column(Integer)
+    defense_pct: Mapped[float | None] = mapped_column(Float)
+    st_snaps: Mapped[int | None] = mapped_column(Integer)
+    st_pct: Mapped[float | None] = mapped_column(Float)
+
+
+class ExpectedPoints(Base):
+    """ffverse ff_opportunity (xFP) — expected stats/points per player-week, latest load wins.
+
+    `ep` holds the player-level columns (actual + `_exp`), with `_team` and `_diff` columns
+    dropped as derivable. ForgeModel feature source and an extra benchmark opponent.
+    """
+
+    __tablename__ = "expected_points"
+    __table_args__ = (
+        UniqueConstraint("season", "week", "gsis_id", name="uq_expected_points_identity"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    snapshot_id: Mapped[int] = mapped_column(ForeignKey("raw.snapshots.id"), nullable=False)
+    season: Mapped[int] = mapped_column(Integer, nullable=False)
+    week: Mapped[int] = mapped_column(Integer, nullable=False)
+    gsis_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    sleeper_id: Mapped[str | None] = mapped_column(String(16), index=True)
+    full_name: Mapped[str | None] = mapped_column(String(128))
+    position: Mapped[str | None] = mapped_column(String(8))
+    team: Mapped[str | None] = mapped_column(String(8))
+    total_fantasy_points: Mapped[float | None] = mapped_column(Float)
+    total_fantasy_points_exp: Mapped[float | None] = mapped_column(Float)
+    ep: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

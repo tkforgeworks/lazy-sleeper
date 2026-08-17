@@ -161,6 +161,17 @@ class Puller:
             ext="csv",
         )
 
+    def pull_ff_opportunity(self, season: int) -> Snapshot:
+        payload = self._nflverse.ff_opportunity(season)
+        return self.snapshot(
+            SnapshotKey("nflverse", "ff_opportunity", season),
+            payload,
+            lambda b: validate_csv(
+                b, required_columns=("player_id", "season", "week"), min_rows=1000
+            ),
+            ext="csv",
+        )
+
     def pull_crosswalk(self) -> Snapshot:
         payload = self._nflverse.crosswalk()
         return self.snapshot(

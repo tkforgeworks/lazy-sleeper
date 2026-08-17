@@ -14,6 +14,39 @@ M0 (bootstrap) — ingestion + immutable snapshot archive + DB schema + CLI + CI
 and [`docs/draft-companion-execution-plan_20260816.md`](docs/draft-companion-execution-plan_20260816.md) for
 the product/architecture spec.
 
+## Dev setup (new machine)
+
+Prereqs: **Python ≥ 3.12**, **Docker Desktop** (local Postgres), **git** + **gh** (`gh auth login`), and the
+Supabase `sb_secret_...` key for the `lazy-sleeper` project (Project Settings → API Keys).
+
+```bash
+gh repo clone tkforgeworks/lazy-sleeper && cd lazy-sleeper
+python -m venv .venv && . .venv/Scripts/activate      # Windows; source .venv/bin/activate elsewhere
+pip install -e ".[dev]"
+cp .env.example .env                                   # then fill SUPABASE_URL / SUPABASE_SECRET_KEY
+docker compose up -d && lazy db upgrade
+```
+
+**Things that are NOT in git and must be moved by hand:**
+
+1. **`data/snapshots/`** — the local raw archive (~30 MB gz). It contains the irreplaceable 2026-08-16
+   preseason vintage; providers revise their data, so it cannot be re-pulled. Copy the folder (or restore it
+   from Supabase Storage once `lazy sync` / LS-12 exists), then rebuild the DB from it:
+   ```bash
+   lazy snapshots reindex          # re-registers every archive file in raw.snapshots
+   lazy load players && lazy load crosswalk && lazy load stats
+   ```
+   Also keep `data_pulls/ff-projections-2026-08-16.zip` (16 MB, the original pull) somewhere off-machine.
+2. **`.env`** — never committed. Only `SUPABASE_URL` / `SUPABASE_SECRET_KEY` need real values today.
+3. **`docker compose` volume** — the dev DB is per-machine; rebuild it with the commands above rather than
+   copying the volume.
+
+Everyday loop: `lazy pull daily` (fresh Sleeper/ESPN/crosswalk snapshots) → `lazy load stats` →
+`pytest -q && ruff check .` → branch `LS-N-…` → PR to `main` (self-merge OK once `ci` is green).
+
+Claude Code notes: repo instructions live in `.claude/CLAUDE.md` (travels with the repo). Per-machine bits
+(`~/.claude/CLAUDE.md`, custom subagents, session memory) do not — set those up once on the new box.
+
 ## Quick start
 
 ```bash
@@ -25,7 +58,7 @@ lazy db upgrade                                          # alembic upgrade head
 
 lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
 lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
-lazy load stats                                          # → core.projections / core.actuals / core.adp
+lazy load stats                                          # → core.projections/actuals/adp/snap_counts/expected_points
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -39,7 +72,8 @@ external source → HttpClient → validate (shape + count) → SnapshotStore
                                                             ├─ data/snapshots/**/*.gz   (local, gitignored)
                                                             ├─ Supabase Storage          (mirror, when configured)
                                                             └─ raw.snapshots             (metadata row in Postgres)
-                                          loaders → core.*  (players, crosswalk, projections, actuals, adp)
+                                          loaders → core.*  (players, crosswalk, projections, actuals, adp,
+                                                            snap_counts, expected_points)
 ```
 
 - **Snapshots are immutable and dated.** Every external pull is kept forever; providers revise their data
