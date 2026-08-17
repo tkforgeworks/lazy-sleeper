@@ -16,16 +16,21 @@ the product/architecture spec.
 
 ## Dev setup (new machine)
 
-Prereqs: **Python ≥ 3.12**, **Docker Desktop** (local Postgres), **git** + **gh** (`gh auth login`), and the
-Supabase `sb_secret_...` key for the `lazy-sleeper` project (Project Settings → API Keys).
+Prereqs: **[uv](https://docs.astral.sh/uv/)** (installs Python 3.12 itself if needed), **Docker Desktop**
+(local Postgres), **git** + **gh** (`gh auth login`), and the Supabase `sb_secret_...` key for the
+`lazy-sleeper` project (Project Settings → API Keys).
 
 ```bash
 gh repo clone tkforgeworks/lazy-sleeper && cd lazy-sleeper
-python -m venv .venv && . .venv/Scripts/activate      # Windows; source .venv/bin/activate elsewhere
-pip install -e ".[dev]"
+uv sync                                                # creates .venv from uv.lock (runtime + dev deps)
 cp .env.example .env                                   # then fill SUPABASE_URL / SUPABASE_SECRET_KEY
-docker compose up -d && lazy db upgrade
+docker compose up -d && uv run lazy db upgrade
 ```
+
+Every command below is `uv run <cmd>` — or activate the venv once (`source .venv/bin/activate`;
+`.venv\Scripts\activate` on Windows) and drop the prefix. `uv.lock` is committed; `uv sync` never
+changes it. To add/upgrade a dependency use `uv add <pkg>` / `uv lock --upgrade-package <pkg>` and commit
+the lockfile.
 
 **Things that are NOT in git and must be moved by hand:**
 
@@ -42,7 +47,8 @@ docker compose up -d && lazy db upgrade
    copying the volume.
 
 Everyday loop: `lazy pull daily` (fresh Sleeper/ESPN/crosswalk snapshots) → `lazy load stats` →
-`pytest -q && ruff check .` → branch `LS-N-…` → PR to `main` (self-merge OK once `ci` is green).
+`uv run pytest -q && uv run ruff check .` → branch `LS-N-…` → PR to `main` (self-merge OK once `ci` is
+green; `ci` runs the same `uv sync --locked` + ruff + pytest + migration round-trip).
 
 Claude Code notes: repo instructions live in `.claude/CLAUDE.md` (travels with the repo). Per-machine bits
 (`~/.claude/CLAUDE.md`, custom subagents, session memory) do not — set those up once on the new box.
@@ -50,8 +56,7 @@ Claude Code notes: repo instructions live in `.claude/CLAUDE.md` (travels with t
 ## Quick start
 
 ```bash
-python -m venv .venv && . .venv/Scripts/activate      # or source .venv/bin/activate
-pip install -e ".[dev]"
+uv sync && source .venv/bin/activate                   # .venv\Scripts\activate on Windows
 cp .env.example .env                                   # local Docker Postgres by default
 docker compose up -d                                   # Postgres 16 on localhost:5433
 lazy db upgrade                                          # alembic upgrade head

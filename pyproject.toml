@@ -24,7 +24,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-cov>=5",

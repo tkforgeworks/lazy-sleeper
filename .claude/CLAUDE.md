@@ -13,7 +13,10 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Stack (decided 2026-08-16)
 
-- Python ≥3.12, hatchling, ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid shadowing the shell command.
+- Python ≥3.12, **uv** (`uv sync` → `.venv`; `uv.lock` committed, CI installs `--locked`; dev deps in
+  `[dependency-groups] dev`; run tools as `uv run pytest` / `uv run ruff` / `uv run lazy`), hatchling,
+  ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid
+  shadowing the shell command.
 - Postgres via SQLAlchemy 2 + Alembic. Local: `docker compose up -d` (port 5433). Hosted target: Supabase
   free tier (Pro is an accepted fallback). Schemas `raw` / `core` / `derived`; plain Postgres only, no
   local-only extensions — migrations must run unchanged on Supabase.
