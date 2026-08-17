@@ -68,6 +68,7 @@ lazy score rules                                         # the league's scoring_
 lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
 lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
+lazy check freshness && lazy check joins                 # data-quality audit (see below)
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -98,6 +99,27 @@ external source → HttpClient → validate (shape + count) → SnapshotStore
   facts** (one row per source/season/week/player, latest load wins). `week` NULL = season. Rows with no
   stat content are dropped at load.
 
+## Data quality — checks to run before trusting the DB
+
+Run these after every `lazy pull daily` + `lazy load stats`, and always the morning of the draft. Each one
+takes seconds; together they cover freshness, identity joins, and scoring.
+
+| # | Command | What good looks like | If it's off |
+|---|---------|---------------------|-------------|
+| 1 | `lazy check freshness` | Every feed you care about is hours old, not days; no `STALE`/`INVALID` flags; `projections_week` shows 18 weeks for past seasons; row counts steady (Sleeper players ≈12k, projections ≈3.3k, ESPN kona ≈1k) | A missing/old row = a pull failed silently → rerun `lazy pull <feed>` and check the log. `INVALID` = provider changed shape → look at `raw.snapshots.validation_notes`. |
+| 2 | `lazy check joins` | Crosswalk ≈6.3k rows, sportradar agree ≈99%, ≤ a handful of conflicts; **top-300 ≥ 299/300**; resolution ≥ 99% per feed with **no unresolved row ≥ 20 pts**; ESPN DST `OK` (32/32); duplicates `0` in both tables | An unresolved row with real points is a player the board would silently drop (2026 rookies until the crosswalk catches up). The name tier resolves exact name+position+team; if it doesn't, note the id and fix by hand (or wait for the next `lazy pull crosswalk`). Duplicates > 0 = two source rows mapped to one player — stop and investigate before building a board. |
+| 3 | `lazy score rules` | The league's map matches what Sleeper shows in Settings → Scoring (4-pt pass TD, 0.04/yd, −1 INT, PPR, −2 fum lost, FG 3/3/3/4/5/6, DEF 10…−4) | Wrong map = someone edited league scoring; `lazy pull league` refreshes it. |
+| 4 | `lazy score preview --position QB --top 10` (repeat RB/WR/TE) | Names you recognise in a sane order; `pts` ≈ `provider` for Sleeper season rows (this league is Sleeper's default map) | Big gaps = stat vocabulary drift on a feed → check the latest snapshot's keys against `ingest/espn_stats.py` / `nflverse_loaders.py`. |
+| 5 | `lazy score preview --position K --top 10` and `--source espn` | Sleeper and ESPN top kickers within ~5% of each other (Sleeper is imputed — see CLAUDE.md) | Sleeper far below ESPN = the imputation isn't firing (keys changed). |
+| 6 | `lazy score preview --position DEF --source espn --top 10` and `lazy score def-rank` | Plausible DEF order; ESPN season DEF 120–160 pts; def-rank top ~10 ppg | Sleeper DEF is expected to be ~20% low (no points-allowed data) — don't use it for DEF totals. |
+| 7 | `lazy score parity` | mean \|Δ\| < 0.02, only −2.00 residuals (return fumbles) | Anything else = the engine or the nflverse loader changed → the parity test in CI should also be red. |
+| 8 | Spot-check 3 players by hand | Pick a QB, a rookie WR, and a K; compare `lazy score preview` vs Sleeper's app projection and the crosswalk row (`select * from core.crosswalk where sleeper_id=…`) | Off by a fixed ratio → scoring; off entirely → identity. |
+
+Known, accepted misses (as of 2026-08-17): top-300 miss #104 Thomas Odukoya (free-agent TE, Sleeper
+`search_rank` artefact, no team — no impact); 3 sportradar conflicts on same-name players (Greg Jones,
+Devon Johnson, Ryan Smith TE↔CB) — the crosswalk maps the wrong namesake, none fantasy-relevant. ESPN's
+"Matthew Hibner" ≠ Sleeper's "Matt Hibner" (nickname; below 20 pts, ignored).
+
 ## Layout
 
 ```
@@ -107,6 +129,7 @@ lazy_sleeper/
   ingest/       http, sleeper, espn, nflverse clients; snapshots; validate; loaders; pipeline
   jobs/cli.py   `lazy` CLI
   api/          FastAPI app (health, snapshots; board/draft endpoints arrive in M3/M4)
+  ingest/audit  data-quality queries behind `lazy check joins|freshness`
   scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook),
                 kicking (FG distance-mix normalizer), defense (brackets/TD roll-ups + streaming rank),
                 league (rules + distributions from DB), parity (engine vs nflverse PPR)

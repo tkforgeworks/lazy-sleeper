@@ -11,6 +11,7 @@ ADP for such players is still captured in core.adp.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -65,25 +66,58 @@ _SLEEPER_KIND_CATEGORY = {
 
 
 # --- identity resolution ------------------------------------------------------------------------
+_SUFFIXES = frozenset({"jr", "sr", "ii", "iii", "iv", "v"})
+
+
+def normalize_name(name: str | None) -> str:
+    """Lowercase alphanumerics, suffix dropped: "Ke'Shawn Williams Jr." → keshawnwilliams."""
+    if not name:
+        return ""
+    parts = [re.sub(r"[^a-z0-9]", "", w.lower()) for w in name.split()]
+    parts = [w for w in parts if w and w not in _SUFFIXES]
+    return "".join(parts)
+
+
 @dataclass
 class SleeperIdResolver:
-    """Foreign ids → sleeper_id. Crosswalk is authoritative; core.players ids fill gaps."""
+    """Foreign ids → sleeper_id.
+
+    Tiers: crosswalk (authoritative) → `core.players` foreign ids → exact normalized
+    (name, position, team) match against `core.players`, only when unique. The name tier exists for
+    rookies/new signings the crosswalk hasn't caught up with; every use is recorded in
+    `resolved_by_name` so it can be audited (`lazy check joins`).
+    """
 
     espn_to_sleeper: dict[str, str] = field(default_factory=dict)
     gsis_to_sleeper: dict[str, str] = field(default_factory=dict)
     pfr_to_sleeper: dict[str, str] = field(default_factory=dict)
+    name_to_sleeper: dict[tuple[str, str, str], str] = field(default_factory=dict)
     unresolved: set[str] = field(default_factory=set)
+    resolved_by_name: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_session(cls, session: Session) -> SleeperIdResolver:
         espn: dict[str, str] = {}
         gsis: dict[str, str] = {}
         pfr: dict[str, str] = {}
-        for e, g, sid in session.execute(select(Player.espn_id, Player.gsis_id, Player.sleeper_id)):
+        names: dict[tuple[str, str, str], str | None] = {}
+        for e, g, sid, name, pos, team in session.execute(
+            select(
+                Player.espn_id,
+                Player.gsis_id,
+                Player.sleeper_id,
+                Player.full_name,
+                Player.position,
+                Player.team,
+            )
+        ):
             if e:
                 espn[str(e)] = sid
             if g:
                 gsis[str(g)] = sid
+            key = (normalize_name(name), pos or "", team or "")
+            if key[0] and pos and team:
+                names[key] = None if key in names else sid  # None marks a collision
         for e, g, pf, sid in session.execute(
             select(Crosswalk.espn_id, Crosswalk.gsis_id, Crosswalk.pfr_id, Crosswalk.sleeper_id)
         ):  # crosswalk wins
@@ -93,12 +127,23 @@ class SleeperIdResolver:
                 gsis[str(g)] = sid
             if pf:
                 pfr[str(pf)] = sid
-        return cls(espn, gsis, pfr)
+        return cls(espn, gsis, pfr, {k: v for k, v in names.items() if v})
 
-    def resolve(self, espn_id: str, position: str | None, pro_team_id: int | None) -> str | None:
+    def resolve(
+        self,
+        espn_id: str,
+        position: str | None,
+        pro_team_id: int | None,
+        full_name: str | None = None,
+    ) -> str | None:
         if position == "DEF":
             return TEAMS.get(pro_team_id or -1)
         sid = self.espn_to_sleeper.get(espn_id)
+        if sid is None and full_name and position:
+            team = TEAMS.get(pro_team_id or -1)
+            sid = self.name_to_sleeper.get((normalize_name(full_name), position, team or ""))
+            if sid is not None:
+                self.resolved_by_name[espn_id] = sid
         if sid is None:
             self.unresolved.add(espn_id)
         return sid
@@ -179,7 +224,7 @@ def espn_stat_rows(
         position = POSITIONS.get(p.get("defaultPositionId"))
         pro_team_id = p.get("proTeamId")
         team = TEAMS.get(pro_team_id) if pro_team_id else None
-        sleeper_id = resolver.resolve(espn_id, position, pro_team_id)
+        sleeper_id = resolver.resolve(espn_id, position, pro_team_id, p.get("fullName"))
         for s in p.get("stats") or []:
             src, split = s.get("statSourceId"), s.get("statSplitTypeId")
             if src not in (SOURCE_ACTUAL, SOURCE_PROJ):

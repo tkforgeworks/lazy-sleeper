@@ -9,6 +9,7 @@ from lazy_sleeper.ingest.stat_loaders import (
     SleeperIdResolver,
     _split,
     espn_stat_rows,
+    normalize_name,
     sleeper_stat_rows,
 )
 
@@ -140,6 +141,29 @@ def test_espn_resolver_tracks_unresolved_and_maps_dst() -> None:
     assert resolver.resolve("2", "WR", 12) is None
     assert resolver.unresolved == {"2"}
     assert resolver.resolve("-16033", "DEF", 33) == "BAL"
+
+
+def test_normalize_name_strips_punctuation_case_and_suffixes() -> None:
+    assert normalize_name("Ke'Shawn Williams Jr.") == "keshawnwilliams"
+    assert normalize_name("Odell Beckham Jr") == normalize_name("odell beckham")
+    assert normalize_name("Marvin Harrison Jr.") == normalize_name("Marvin Harrison III")
+    assert normalize_name("Amon-Ra St. Brown") == "amonrastbrown"
+    assert normalize_name(None) == "" and normalize_name("") == ""
+
+
+def test_espn_resolver_name_tier_only_when_ids_fail_and_match_is_unique() -> None:
+    # GB proTeamId is 9; two "Ryan Smith" collide and must NOT resolve by name
+    resolver = SleeperIdResolver(
+        espn_to_sleeper={"1": "A"},
+        name_to_sleeper={("treysmack", "K", "GB"): "13545"},
+    )
+    assert resolver.resolve("1", "K", 9, "Someone Else") == "A"  # id tier wins
+    assert resolver.resolve("4869461", "K", 9, "Trey Smack") == "13545"
+    assert resolver.resolved_by_name == {"4869461": "13545"}
+    assert resolver.resolve("4869461", "K", 18, "Trey Smack") is None  # wrong team → no guess
+    assert resolver.resolve("4869461", "WR", 9, "Trey Smack") is None  # wrong position
+    assert resolver.resolve("77", "K", 9, None) is None  # no name → no guess
+    assert resolver.unresolved == {"4869461", "77"}
 
 
 def test_split_routes_by_category_and_strips_it() -> None:

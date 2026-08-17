@@ -436,3 +436,89 @@ def score_preview(
             typer.echo(
                 f"{r.position or '':<4}{r.team or '':<5}{name[:25]:<26}{pts:>8.1f}{prov:>10}"
             )
+
+
+# --- check -----------------------------------------------------------------
+check_app = typer.Typer(no_args_is_help=True)
+app.add_typer(check_app, name="check", help="Data-quality audits over raw/core")
+
+
+@check_app.command("joins")
+def check_joins(
+    top_n: int = typer.Option(300, help="Top-N players by Sleeper search_rank to check"),
+    min_points: float = typer.Option(20.0, help="Report unresolved rows with ≥ this many pts"),
+) -> None:
+    """Join coverage: crosswalk, sleeper_id resolution per feed, ESPN DST path, duplicates."""
+    from lazy_sleeper.ingest import audit
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        c = audit.counts(s)
+        xw = audit.crosswalk_report(s, top_n)
+        res = audit.resolve_report(s, min_points)
+        d = audit.def_report(s)
+        dups = audit.duplicate_report(s)
+
+    typer.echo(f"players {c.players} {c.players_by_position}  crosswalk {c.crosswalk}")
+    typer.echo(
+        f"projections {c.projections}  actuals {c.actuals}  adp {c.adp} ({c.adp_resolved} resolved)"
+    )
+    typer.echo(
+        f"\ncrosswalk: {xw.rows} rows · sportradar {xw.with_sportradar} · gsis {xw.with_gsis} · "
+        f"espn {xw.with_espn} · joined to players {xw.players_joined} · "
+        f"sportradar agree {xw.sportradar_agree} / conflicts {len(xw.sportradar_conflicts)}"
+    )
+    for sid, pn, xn in xw.sportradar_conflicts[:10]:
+        typer.echo(f"  conflict {sid}: players={pn!r} crosswalk={xn!r}")
+    typer.echo(f"top-{xw.top_n} by search_rank in crosswalk: {xw.top_n_joined}/{xw.top_n}")
+    for m in xw.top_n_misses:
+        typer.echo(
+            f"  miss #{m['search_rank']} {m['name']} {m['position']} {m['team']} "
+            f"({m['sleeper_id']})"
+        )
+
+    typer.echo("\nsleeper_id resolution:")
+    for r in res:
+        typer.echo(f"  {r.table:<12}{r.source:<10}{r.resolved:>7}/{r.rows:<7} {r.rate:6.1%}")
+        for u in r.unresolved_top:
+            typer.echo(
+                f"      unresolved {u['source_player_id']:<12}{u['position'] or '':<4}"
+                f"{u['team'] or '':<4}s{u['season']} max {u['max_provider_points']:.1f} pts "
+                f"({u['rows']} rows)"
+            )
+
+    status = "OK" if d.ok else "MISMATCH"
+    typer.echo(
+        f"\nESPN DST → Sleeper DEF: {status} · players DEF ids {len(d.players_def_ids)} · "
+        f"espn DEF ids {len(d.espn_def_ids)} · unresolved rows {d.espn_def_unresolved}"
+    )
+    for name, got in (("players", d.players_def_ids), ("espn", d.espn_def_ids)):
+        if got != audit.NFL_TEAMS:
+            typer.echo(
+                f"  {name}: missing {sorted(audit.NFL_TEAMS - got)} "
+                f"extra {sorted(got - audit.NFL_TEAMS)}"
+            )
+
+    for dr in dups:
+        typer.echo(f"\nduplicates in {dr.table}: {dr.duplicate_groups}")
+        for ex in dr.examples:
+            typer.echo(f"  {ex}")
+
+
+@check_app.command("freshness")
+def check_freshness(stale_hours: float = typer.Option(36.0)) -> None:
+    """Newest snapshot per feed with its age; flags stale or invalid feeds."""
+    from lazy_sleeper.ingest import audit
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rows = audit.freshness(s)
+    typer.echo(
+        f"{'source':<10}{'kind':<20}{'season':<8}{'weeks':>6}{'age_h':>7}  {'rows':>7}  flag"
+    )
+    for f in rows:
+        flag = ("STALE " if f.age_hours > stale_hours else "") + ("" if f.valid else "INVALID")
+        typer.echo(
+            f"{f.source:<10}{f.kind:<20}{str(f.season or '-'):<8}{f.weeks or '-':>6}"
+            f"{f.age_hours:>7.1f}  {str(f.record_count or '-'):>7}  {flag}"
+        )
