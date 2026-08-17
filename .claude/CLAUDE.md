@@ -13,7 +13,10 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Stack (decided 2026-08-16)
 
-- Python ≥3.12, hatchling, ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid shadowing the shell command.
+- Python ≥3.12, **uv** (`uv sync` → `.venv`; `uv.lock` committed, CI installs `--locked`; dev deps in
+  `[dependency-groups] dev`; run tools as `uv run pytest` / `uv run ruff` / `uv run lazy`), hatchling,
+  ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid
+  shadowing the shell command.
 - Postgres via SQLAlchemy 2 + Alembic. Local: `docker compose up -d` (port 5433). Hosted target: Supabase
   free tier (Pro is an accepted fallback). Schemas `raw` / `core` / `derived`; plain Postgres only, no
   local-only extensions — migrations must run unchanged on Supabase.
@@ -37,8 +40,11 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   don't align (K <40 yd; DEF pts-allowed 14-17/18-21/22-27/35-45/46+) the ESPN-native key is kept, not merged.
 - ESPN espn_id → sleeper_id via crosswalk (authoritative) then `core.players.espn_id`; DEF via proTeamId → team abbr.
 - Validate shape/count on ingest; failed validation is still stored (`valid=false`) and loaders skip it.
-- Stat-level everything: never ingest pre-scored fantasy points as truth; the scoring engine (M1) applies
-  the league's literal `scoring_settings` map.
+- Stat-level everything: never ingest pre-scored fantasy points as truth; `scoring/` applies the league's
+  literal `scoring_settings` map (`ScoringRules.from_league` → `Scorer.score(stats, position)`), i.e.
+  `Σ weight[k]·stats[k]` — no hardcoded constants. K/DEF plug in as `Scorer.normalizers` (LS-19/20).
+  Evidence: Sleeper's *weekly* QB `pts_ppr` implies 0.05/pass yd vs its own 0.04 map; season totals match.
+  `provider_points` on rows is an x-check only. `lazy score rules|preview` for eyeballing.
 - Join spine = dynastyprocess crosswalk on `sleeper_id`; `sportradar_id` is the verification key. Sleeper's
   own espn/gsis/yahoo ids are sparse — don't rely on them. CSVs from R use `NA` for null.
 - Verified asset names live in `lazy_sleeper/ingest/nflverse.py` docstring (stats_player_week_YYYY, etc.).
