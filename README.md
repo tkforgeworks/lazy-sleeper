@@ -105,7 +105,8 @@ lazy_sleeper/
   ingest/       http, sleeper, espn, nflverse clients; snapshots; validate; loaders; pipeline
   jobs/cli.py   `lazy` CLI
   api/          FastAPI app (health, snapshots; board/draft endpoints arrive in M3/M4)
-  scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook)
+  scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook),
+                kicking (FG distance-mix normalizer), league (rules + mix from DB)
   metrics/ providers/ model/ benchmark/   (M1+)
 tests/          unit tests + trimmed real-payload fixtures
 ```

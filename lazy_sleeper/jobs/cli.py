@@ -321,6 +321,24 @@ def score_rules() -> None:
         typer.echo(f"  {k:<18}{v:>7g}")
 
 
+@score_app.command("kmix")
+def score_kmix(
+    seasons: str = typer.Option(
+        "2023,2024,2025", help="Comma-separated seasons of nflverse actuals"
+    ),
+) -> None:
+    """FG distance mix derived from core.actuals vs the frozen DEFAULT_MIX used for projections."""
+    from lazy_sleeper.scoring import DEFAULT_MIX, distance_mix_from_actuals
+    from lazy_sleeper.scoring.kicking import BUCKET_NAMES
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        live = distance_mix_from_actuals(s, tuple(int(x) for x in seasons.split(",")))
+    typer.echo(f"{'bucket':<8}{'actuals':>9}{'default':>9}")
+    for b in BUCKET_NAMES:
+        typer.echo(f"{b:<8}{live.shares[b]:>9.4f}{DEFAULT_MIX.shares[b]:>9.4f}")
+
+
 @score_app.command("preview")
 def score_preview(
     season: int = typer.Option(2026),
@@ -334,11 +352,11 @@ def score_preview(
     from sqlalchemy import select
 
     from lazy_sleeper.db.models import Actual, Player, Projection
-    from lazy_sleeper.scoring import Scorer, load_league_rules
+    from lazy_sleeper.scoring import default_scorer, load_league_rules
 
     ctx = _Ctx()
     with session_scope(ctx.sessions) as s:
-        scorer = Scorer(load_league_rules(s, ctx.store))
+        scorer = default_scorer(load_league_rules(s, ctx.store))
         model = Actual if actuals else Projection
         stmt = select(model).where(
             model.source == source,
