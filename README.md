@@ -67,6 +67,7 @@ lazy load stats                                          # → core.projections/
 lazy score rules                                         # the league's scoring_settings (latest league snapshot)
 lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
+lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -108,7 +109,7 @@ lazy_sleeper/
   api/          FastAPI app (health, snapshots; board/draft endpoints arrive in M3/M4)
   scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook),
                 kicking (FG distance-mix normalizer), defense (brackets/TD roll-ups + streaming rank),
-                league (rules + distributions from DB)
+                league (rules + distributions from DB), parity (engine vs nflverse PPR)
   metrics/ providers/ model/ benchmark/   (M1+)
 tests/          unit tests + trimmed real-payload fixtures
 ```

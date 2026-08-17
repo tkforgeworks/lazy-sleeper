@@ -41,3 +41,53 @@ def distance_mix_from_actuals(
             if isinstance(v, int | float):
                 counts[b] += float(v)
     return DistanceMix.from_counts(counts)
+
+
+# --- parity vs nflverse ---------------------------------------------------------
+
+# Known, intentional differences between this league's map and nflverse `fantasy_points_ppr` (a
+# fixed 4 / 0.04 / −2 INT / full-PPR / −2 fumble map, no kicking). Documented here; the parity test
+# adjusts for them explicitly rather than hiding them in a tolerance.
+NFLVERSE_PPR_DIFFS: dict[str, str] = {
+    "pass_int": "league −1 vs nflverse −2",
+    "fum_rec_td": "league +6 vs nflverse 0 (not in its formula)",
+    "fum_lost": "nflverse skips fumbles lost on kick/punt returns; the league charges them",
+}
+
+
+def parity_rows(
+    session: Session, rules: ScoringRules, season: int = 2025, source: str = "nflverse"
+) -> list[dict]:
+    """Weekly offense actuals for the parity fixture: position, week, ids, provider pts, stats.
+
+    Stats are trimmed to keys the league scores plus `fum`, which is enough to score and to explain
+    every delta. K is excluded — nflverse PPR excludes kicking.
+    """
+    from sqlalchemy import select
+
+    from lazy_sleeper.db.models import Actual
+    from lazy_sleeper.scoring.rules import OFFENSE_POSITIONS
+
+    keep = set(rules.weights) | {"fum"}
+    stmt = (
+        select(Actual)
+        .where(
+            Actual.source == source,
+            Actual.season == season,
+            Actual.week.is_not(None),
+            Actual.position.in_(sorted(OFFENSE_POSITIONS)),
+            Actual.provider_points.is_not(None),
+        )
+        .order_by(Actual.week, Actual.source_player_id)
+    )
+    return [
+        {
+            "position": a.position,
+            "week": a.week,
+            "sleeper_id": a.sleeper_id,
+            "source_player_id": a.source_player_id,
+            "provider_points": a.provider_points,
+            "stats": {k: v for k, v in a.stats.items() if k in keep},
+        }
+        for a in session.scalars(stmt)
+    ]
