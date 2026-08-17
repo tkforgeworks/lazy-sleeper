@@ -25,7 +25,7 @@ lazy db upgrade                                          # alembic upgrade head
 
 lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
 lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
-lazy load stats                                          # → core.projections / core.actuals / core.adp
+lazy load stats                                          # → core.projections/actuals/adp/snap_counts/expected_points
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -39,7 +39,8 @@ external source → HttpClient → validate (shape + count) → SnapshotStore
                                                             ├─ data/snapshots/**/*.gz   (local, gitignored)
                                                             ├─ Supabase Storage          (mirror, when configured)
                                                             └─ raw.snapshots             (metadata row in Postgres)
-                                          loaders → core.*  (players, crosswalk, projections, actuals, adp)
+                                          loaders → core.*  (players, crosswalk, projections, actuals, adp,
+                                                            snap_counts, expected_points)
 ```
 
 - **Snapshots are immutable and dated.** Every external pull is kept forever; providers revise their data

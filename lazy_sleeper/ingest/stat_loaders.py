@@ -1,4 +1,4 @@
-"""Snapshot payloads → core.projections / core.actuals / core.adp.
+"""Snapshot payloads → core.projections / actuals / adp / snap_counts / expected_points.
 
 Pure transforms (`sleeper_stat_rows`, `espn_stat_rows`) are separated from the DB writes so they
 can be unit-tested on fixtures without a database.
@@ -19,7 +19,16 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from lazy_sleeper.db.models import Actual, Adp, Crosswalk, Player, Projection, Snapshot
+from lazy_sleeper.db.models import (
+    Actual,
+    Adp,
+    Crosswalk,
+    ExpectedPoints,
+    Player,
+    Projection,
+    SnapCount,
+    Snapshot,
+)
 from lazy_sleeper.ingest.espn_stats import (
     POSITIONS,
     SOURCE_ACTUAL,
@@ -27,6 +36,11 @@ from lazy_sleeper.ingest.espn_stats import (
     SPLIT_SEASON,
     TEAMS,
     decode_stats,
+)
+from lazy_sleeper.ingest.nflverse_loaders import (
+    expected_points_rows,
+    nflverse_actual_rows,
+    snap_count_rows,
 )
 from lazy_sleeper.ingest.validate import parse_json
 
@@ -53,23 +67,33 @@ _SLEEPER_KIND_CATEGORY = {
 # --- identity resolution ------------------------------------------------------------------------
 @dataclass
 class SleeperIdResolver:
-    """espn_id → sleeper_id. Crosswalk is authoritative; core.players.espn_id fills gaps."""
+    """Foreign ids → sleeper_id. Crosswalk is authoritative; core.players ids fill gaps."""
 
     espn_to_sleeper: dict[str, str] = field(default_factory=dict)
+    gsis_to_sleeper: dict[str, str] = field(default_factory=dict)
+    pfr_to_sleeper: dict[str, str] = field(default_factory=dict)
     unresolved: set[str] = field(default_factory=set)
 
     @classmethod
     def from_session(cls, session: Session) -> SleeperIdResolver:
-        m: dict[str, str] = {}
-        for espn_id, sid in session.execute(
-            select(Player.espn_id, Player.sleeper_id).where(Player.espn_id.is_not(None))
-        ):
-            m[str(espn_id)] = sid
-        for espn_id, sid in session.execute(
-            select(Crosswalk.espn_id, Crosswalk.sleeper_id).where(Crosswalk.espn_id.is_not(None))
-        ):
-            m[str(espn_id)] = sid  # crosswalk wins
-        return cls(m)
+        espn: dict[str, str] = {}
+        gsis: dict[str, str] = {}
+        pfr: dict[str, str] = {}
+        for e, g, sid in session.execute(select(Player.espn_id, Player.gsis_id, Player.sleeper_id)):
+            if e:
+                espn[str(e)] = sid
+            if g:
+                gsis[str(g)] = sid
+        for e, g, pf, sid in session.execute(
+            select(Crosswalk.espn_id, Crosswalk.gsis_id, Crosswalk.pfr_id, Crosswalk.sleeper_id)
+        ):  # crosswalk wins
+            if e:
+                espn[str(e)] = sid
+            if g:
+                gsis[str(g)] = sid
+            if pf:
+                pfr[str(pf)] = sid
+        return cls(espn, gsis, pfr)
 
     def resolve(self, espn_id: str, position: str | None, pro_team_id: int | None) -> str | None:
         if position == "DEF":
@@ -202,6 +226,14 @@ def _f(v: Any) -> float | None:
 # --- DB writes ----------------------------------------------------------------------------------
 _STAT_UPDATE = ("snapshot_id", "sleeper_id", "position", "team", "gp", "provider_points", "stats")
 _ADP_UPDATE = ("position", *_ADP_FIELDS)
+_SNAP_UPDATE = (
+    "snapshot_id", "sleeper_id", "player", "position", "team", "opponent",
+    "offense_snaps", "offense_pct", "defense_snaps", "defense_pct", "st_snaps", "st_pct",
+)  # fmt: skip
+_EP_UPDATE = (
+    "snapshot_id", "sleeper_id", "full_name", "position", "team",
+    "total_fantasy_points", "total_fantasy_points_exp", "ep",
+)  # fmt: skip
 
 
 def _split(rows: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -247,6 +279,8 @@ class LoadResult:
     projections: int = 0
     actuals: int = 0
     adp: int = 0
+    snap_counts: int = 0
+    expected_points: int = 0
 
 
 def load_stat_snapshot(
@@ -257,24 +291,57 @@ def load_stat_snapshot(
         stat_rows, adp_rows = sleeper_stat_rows(payload, snapshot)
         p, a = write_stat_rows(session, stat_rows)
         return LoadResult(p, a, write_adp(session, adp_rows))
+    resolver = resolver or SleeperIdResolver.from_session(session)
     if snapshot.source == "espn" and snapshot.kind == "kona":
-        resolver = resolver or SleeperIdResolver.from_session(session)
         p, a = write_stat_rows(session, espn_stat_rows(payload, snapshot, resolver))
-        if resolver.unresolved:
-            log.warning(
-                "espn snapshot %s: %d espn ids unresolved to sleeper_id (rows kept, NULL id)",
-                snapshot.id,
-                len(resolver.unresolved),
-            )
+        _warn_unresolved("espn", snapshot, resolver)
         return LoadResult(p, a, 0)
+    if snapshot.source == "nflverse" and snapshot.kind == "stats_player_week":
+        rows = nflverse_actual_rows(
+            payload, snapshot, resolver.gsis_to_sleeper, resolver.unresolved
+        )
+        _, a = write_stat_rows(session, rows)
+        _warn_unresolved("nflverse", snapshot, resolver)
+        return LoadResult(0, a, 0)
+    if snapshot.source == "nflverse" and snapshot.kind == "snap_counts":
+        rows = snap_count_rows(payload, snapshot, resolver.pfr_to_sleeper)
+        _upsert(session, SnapCount.__table__, rows, "uq_snap_count_identity", _SNAP_UPDATE, 2000)
+        return LoadResult(snap_counts=len(rows))
+    if snapshot.source == "nflverse" and snapshot.kind == "ff_opportunity":
+        rows = expected_points_rows(payload, snapshot, resolver.gsis_to_sleeper)
+        _upsert(
+            session, ExpectedPoints.__table__, rows, "uq_expected_points_identity", _EP_UPDATE, 2000
+        )
+        return LoadResult(expected_points=len(rows))
     raise ValueError(f"snapshot {snapshot.id} ({snapshot.source}/{snapshot.kind}): not a stat feed")
+
+
+def _warn_unresolved(source: str, snapshot: Snapshot, resolver: SleeperIdResolver) -> None:
+    if resolver.unresolved:
+        log.warning(
+            "%s snapshot %s: %d ids unresolved to sleeper_id so far (rows kept, NULL id)",
+            source,
+            snapshot.id,
+            len(resolver.unresolved),
+        )
 
 
 def loaded_snapshot_ids(session: Session) -> set[int]:
     """Snapshots that have contributed rows to either table."""
     ids = set(session.scalars(select(Projection.snapshot_id).distinct()))
     ids |= set(session.scalars(select(Actual.snapshot_id).distinct()))
+    ids |= set(session.scalars(select(SnapCount.snapshot_id).distinct()))
+    ids |= set(session.scalars(select(ExpectedPoints.snapshot_id).distinct()))
     return ids
 
 
-STAT_KINDS = ("projections_season", "projections_week", "stats_season", "stats_week", "kona")
+STAT_KINDS = (
+    "projections_season",
+    "projections_week",
+    "stats_season",
+    "stats_week",
+    "kona",
+    "stats_player_week",
+    "snap_counts",
+    "ff_opportunity",
+)

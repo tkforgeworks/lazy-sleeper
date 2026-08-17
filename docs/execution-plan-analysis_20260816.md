@@ -250,7 +250,7 @@ Project **LS** · fix versions `0.1.0` = draft-2026, `0.2.0` = season-2026, `1.0
 | Epic | Key | Stories |
 | --- | --- | --- |
 | E1 Repo & tooling bootstrap (remaining) | LS-1 | LS-10 ruleset PATCH · LS-11 Supabase bucket + docs · LS-12 `lazy sync` · LS-13 backup 08-16 archive |
-| E2 Ingestion & snapshot archive | LS-2 | LS-14 projections/ADP → `core.projections` + `core.adp` (+ ESPN actuals → `core.actuals`) · LS-15 nflverse actuals/snaps/kicking/xFP → `core.actuals` + snaps · LS-16 draft picks/rosters → core · LS-17 daily pull scheduler |
+| E2 Ingestion & snapshot archive | LS-2 | LS-14 projections/ADP → `core.projections` + `core.adp` (+ ESPN actuals → `core.actuals`) · LS-15 nflverse actuals/snaps/kicking/xFP → `core.actuals` + `core.snap_counts` + `core.expected_points` · LS-16 draft picks/rosters → core · LS-17 daily pull scheduler |
 | E3 Scoring engine & join spine | LS-3 | LS-18 QB/RB/WR/TE scoring · LS-19 K distance mix · LS-20 DEF scoring + streaming rank · LS-21 parity test · LS-22 crosswalk/DST join verify |
 | E4 Benchmark scoreboard | LS-4 | LS-23 season scoreboard · LS-24 weekly scoreboard · LS-25 blend weights + provider abstraction |
 | E5 2026 draft board | LS-5 | LS-26 baselines · LS-27 flex-aware VORP · LS-28 tiers/cliffs · LS-29 ADP delta/disagreement · LS-30 `/board` + daily regen |

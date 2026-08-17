@@ -9,7 +9,7 @@ lazy pull nflverse 2025         # weekly stats + snap counts
 lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
 lazy load players               # latest valid players snapshot → core.players
 lazy load crosswalk
-lazy load stats                 # valid, not-yet-loaded snapshots → core.projections/actuals/adp
+lazy load stats                 # not-yet-loaded snapshots → projections/actuals/adp/snaps/xfp
 lazy load stats --source sleeper --season 2026   # only matching snapshots
 lazy snapshots reindex          # re-register local archive files after a DB reset
 lazy db upgrade                 # alembic upgrade head
@@ -151,6 +151,7 @@ def pull_nflverse(
         p = ctx.puller(s)
         p.pull_nflverse_stats(season)
         p.pull_nflverse_snaps(season)
+        p.pull_ff_opportunity(season)
         if crosswalk:
             p.pull_crosswalk()
 
@@ -261,19 +262,22 @@ def load_stats_cmd(
             snaps = list(latest.values())
         already = set() if reload else loaded_snapshot_ids(s)
         resolver = SleeperIdResolver.from_session(s)
-        tp = ta = tadp = done = 0
+        tp = ta = tadp = tsn = tep = done = 0
         for snap in snaps:
             if snap.id in already:
                 continue
             r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver)
             done += 1
             tp, ta, tadp = tp + r.projections, ta + r.actuals, tadp + r.adp
+            tsn, tep = tsn + r.snap_counts, tep + r.expected_points
             typer.echo(
                 f"  {snap.source}/{snap.kind} s={snap.season} w={snap.week} -> "
-                f"{r.projections} proj, {r.actuals} actual, {r.adp} adp"
+                f"{r.projections} proj, {r.actuals} actual, {r.adp} adp, "
+                f"{r.snap_counts} snaps, {r.expected_points} xfp"
             )
     typer.echo(
-        f"loaded {done} snapshots: {tp} projections, {ta} actuals, {tadp} adp rows"
+        f"loaded {done} snapshots: {tp} projections, {ta} actuals, {tadp} adp, "
+        f"{tsn} snap counts, {tep} expected points"
         + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
     )
 
