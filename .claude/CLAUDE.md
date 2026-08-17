@@ -7,9 +7,28 @@ Keep this file in sync as decisions land.
 ## Deadline & milestones
 
 Live draft **Fri 2026-09-04 8 PM ET**. Milestones (full detail in `docs/execution-plan-analysis_20260816.md` §2/§7):
-M0 bootstrap ✅ → M1 scoring engine + join spine → M2 benchmark scoreboard → M3 consensus draft board →
-M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
+M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benchmark scoreboard → M3 consensus
+draft board → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
 Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
+
+## Status (updated 2026-08-17 — refresh this block whenever a story merges)
+
+- **Done:** LS-10, 13, 14, 15, 18, 19, 20, 21, 22 (PRs #1–#9). 131 tests, `ci` required on `main`.
+- **Next up, in order:** M2 = **LS-23** (season scoreboard Sleeper/ESPN/naive 2024–25, MAE + Spearman by
+  position, `lazy benchmark season`, committed CSV) → LS-24 (weekly) → LS-25 (inverse-error blend weights as
+  versioned JSON + `ProjectionProvider`/`SleeperProvider`/`EspnProvider`/`EnsembleProvider`). Then slot
+  **LS-17** daily scheduler (+ LS-11/12 Supabase bucket & `lazy sync`) before the board. M3 = LS-26→30
+  (baselines, flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
+  M4 = LS-16 → LS-31–38.
+- **Open loose ends (not blocking M2/M3, blocking draft-night reliability):** LS-11/12 (archive is
+  single-machine since the 08-16 backup), LS-17 (nothing runs `lazy pull daily` unattended), LS-16.
+- **Guidance for LS-23 (from the 2026-08-17 review):** stored 2024/25 season projections are genuine
+  preseason vintages (`last_modified` = Jan-after is ADP churn; Spearman vs actuals 0.3–0.7, MAE 40–80 →
+  no leakage). Quick top-N-by-projection numbers: 2025 RB Sleeper 0.67 / ESPN 0.70, WR 0.59/0.59,
+  QB 0.33/0.15, TE 0.36/0.33 — the plan doc's 0.71/0.86 anchor does **not** reproduce; define the pool
+  (recommend top-N by preseason ADP per position), report MAE + Spearman on it, and expect QB/TE weights
+  to need shrinkage toward market. K/DEF: don't blend Sleeper naively (missing short FGs / no pts-allowed).
+- Jira: move the story to In Progress when the branch opens, Done when the PR merges.
 
 ## Stack (decided 2026-08-16)
 
