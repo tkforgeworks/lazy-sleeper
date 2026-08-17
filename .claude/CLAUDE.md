@@ -38,7 +38,13 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   (Sleeper `LAR`) and `NA` for nulls/unattributed player ids. nflverse `fantasy_points_ppr` excludes kicking.
 - ESPN stat ids → Sleeper keys via `ingest/espn_stats.py` (empirically verified 2026-08-16). Where ESPN buckets
   don't align (K <40 yd; DEF pts-allowed 14-17/18-21/22-27/35-45/46+) the ESPN-native key is kept, not merged.
-- ESPN espn_id → sleeper_id via crosswalk (authoritative) then `core.players.espn_id`; DEF via proTeamId → team abbr.
+- ESPN espn_id → sleeper_id via crosswalk (authoritative) → `core.players.espn_id` → exact normalized
+  (name, position, team) match on `core.players` when unique (`stat_loaders.normalize_name`; audited via
+  `resolver.resolved_by_name`) — needed for 2026 rookies (Smack/Smyth/Zvada Ks) until the crosswalk catches
+  up. DEF via proTeamId → team abbr == Sleeper DEF id (32/32 verified, LS-22).
+- `lazy check joins|freshness|player <name> -t TEAM` (`ingest/audit.py`) are the data-quality gate — README §"Data
+  quality" has the manual checklist + accepted misses. Baseline 2026-08-17: Sleeper 100%, ESPN 99.9%,
+  nflverse 99.8% resolved; top-300 299/300; 0 duplicates.
 - Validate shape/count on ingest; failed validation is still stored (`valid=false`) and loaders skip it.
 - Stat-level everything: never ingest pre-scored fantasy points as truth; `scoring/` applies the league's
   literal `scoring_settings` map (`ScoringRules.from_league` → `Scorer.score(stats, position)`), i.e.
