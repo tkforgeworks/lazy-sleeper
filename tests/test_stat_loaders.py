@@ -5,7 +5,12 @@ from datetime import UTC, datetime
 
 from lazy_sleeper.db.models import Snapshot
 from lazy_sleeper.ingest.espn_stats import POSITIONS, TEAMS, decode_stats
-from lazy_sleeper.ingest.stat_loaders import SleeperIdResolver, espn_stat_rows, sleeper_stat_rows
+from lazy_sleeper.ingest.stat_loaders import (
+    SleeperIdResolver,
+    _split,
+    espn_stat_rows,
+    sleeper_stat_rows,
+)
 
 
 def _snap(source: str, kind: str, season: int | None, week: int | None, sid: int = 7) -> Snapshot:
@@ -135,3 +140,20 @@ def test_espn_resolver_tracks_unresolved_and_maps_dst() -> None:
     assert resolver.resolve("2", "WR", 12) is None
     assert resolver.unresolved == {"2"}
     assert resolver.resolve("-16033", "DEF", 33) == "BAL"
+
+
+def test_split_routes_by_category_and_strips_it() -> None:
+    rows = [
+        {"category": "proj", "a": 1},
+        {"category": "actual", "a": 2},
+        {"category": "proj", "a": 3},
+    ]
+    proj, actual = _split(rows)
+    assert [r["a"] for r in proj] == [1, 3] and [r["a"] for r in actual] == [2]
+    assert all("category" not in r for r in proj + actual)
+
+
+def test_espn_fixture_yields_both_projections_and_actuals(espn_kona_payload: bytes) -> None:
+    rows = espn_stat_rows(espn_kona_payload, _snap("espn", "kona", 2025, None), SleeperIdResolver())
+    proj, actual = _split(rows)
+    assert proj and actual, "2025 kona carries both projections and actuals"

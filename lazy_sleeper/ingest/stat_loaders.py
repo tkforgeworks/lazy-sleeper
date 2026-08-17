@@ -1,4 +1,4 @@
-"""Snapshot payloads → core.stat_lines / core.adp.
+"""Snapshot payloads → core.projections / core.actuals / core.adp.
 
 Pure transforms (`sleeper_stat_rows`, `espn_stat_rows`) are separated from the DB writes so they
 can be unit-tested on fixtures without a database.
@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from lazy_sleeper.db.models import Adp, Crosswalk, Player, Snapshot, StatLine
+from lazy_sleeper.db.models import Actual, Adp, Crosswalk, Player, Projection, Snapshot
 from lazy_sleeper.ingest.espn_stats import (
     POSITIONS,
     SOURCE_ACTUAL,
@@ -84,7 +84,11 @@ class SleeperIdResolver:
 def sleeper_stat_rows(
     payload: bytes, snapshot: Snapshot
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Sleeper projections/stats payload → (stat_line rows, adp rows)."""
+    """Sleeper projections/stats payload → (stat rows, adp rows).
+
+    Stat rows carry a transient "category" (proj|actual) used only to route them to
+    core.projections or core.actuals; it is popped before insert.
+    """
     category = _SLEEPER_KIND_CATEGORY.get(snapshot.kind)
     if category is None:
         raise ValueError(f"not a Sleeper stat snapshot kind: {snapshot.kind}")
@@ -138,7 +142,10 @@ def sleeper_stat_rows(
 def espn_stat_rows(
     payload: bytes, snapshot: Snapshot, resolver: SleeperIdResolver
 ) -> list[dict[str, Any]]:
-    """ESPN kona payload → stat_line rows (season + weekly, proj + actual, all seasons present)."""
+    """ESPN kona payload → stat rows (season + weekly, proj + actual, all seasons present).
+
+    Each row carries a transient "category" (proj|actual) for routing; popped before insert.
+    """
     data = parse_json(payload)
     rows: list[dict[str, Any]] = []
     seen: set[tuple[str, str, int, int | None]] = set()
@@ -193,61 +200,81 @@ def _f(v: Any) -> float | None:
 
 
 # --- DB writes ----------------------------------------------------------------------------------
-_STAT_UPDATE = ("sleeper_id", "position", "team", "gp", "provider_points", "stats")
+_STAT_UPDATE = ("snapshot_id", "sleeper_id", "position", "team", "gp", "provider_points", "stats")
 _ADP_UPDATE = ("position", *_ADP_FIELDS)
 
 
-def write_stat_lines(session: Session, rows: Iterable[dict[str, Any]], *, batch: int = 2000) -> int:
-    rows = list(rows)
+def _split(rows: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    proj: list[dict[str, Any]] = []
+    actual: list[dict[str, Any]] = []
+    for r in rows:
+        r = dict(r)
+        cat = r.pop("category")
+        (proj if cat == "proj" else actual).append(r)
+    return proj, actual
+
+
+def _upsert(
+    session: Session, table, rows: list[dict[str, Any]], constraint: str, cols, batch: int
+) -> None:  # noqa: ANN001
     for i in range(0, len(rows), batch):
         chunk = rows[i : i + batch]
-        stmt = insert(StatLine.__table__).values(chunk)
+        stmt = insert(table).values(chunk)
         stmt = stmt.on_conflict_do_update(
-            constraint="uq_stat_line_identity",
-            set_={c: getattr(stmt.excluded, c) for c in _STAT_UPDATE},
+            constraint=constraint, set_={c: getattr(stmt.excluded, c) for c in cols}
         )
         session.execute(stmt)
-    return len(rows)
+
+
+def write_stat_rows(
+    session: Session, rows: Iterable[dict[str, Any]], *, batch: int = 2000
+) -> tuple[int, int]:
+    """Route rows to core.projections (per-snapshot vintage) / core.actuals (latest wins)."""
+    proj, actual = _split(rows)
+    _upsert(session, Projection.__table__, proj, "uq_projection_identity", _STAT_UPDATE[1:], batch)
+    _upsert(session, Actual.__table__, actual, "uq_actual_identity", _STAT_UPDATE, batch)
+    return len(proj), len(actual)
 
 
 def write_adp(session: Session, rows: Iterable[dict[str, Any]], *, batch: int = 2000) -> int:
     rows = list(rows)
-    for i in range(0, len(rows), batch):
-        chunk = rows[i : i + batch]
-        stmt = insert(Adp.__table__).values(chunk)
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_adp_identity",
-            set_={c: getattr(stmt.excluded, c) for c in _ADP_UPDATE},
-        )
-        session.execute(stmt)
+    _upsert(session, Adp.__table__, rows, "uq_adp_identity", _ADP_UPDATE, batch)
     return len(rows)
+
+
+@dataclass
+class LoadResult:
+    projections: int = 0
+    actuals: int = 0
+    adp: int = 0
 
 
 def load_stat_snapshot(
     session: Session, snapshot: Snapshot, payload: bytes, resolver: SleeperIdResolver | None = None
-) -> tuple[int, int]:
-    """Dispatch one snapshot to the right transform and write. Returns (stat rows, adp rows)."""
+) -> LoadResult:
+    """Dispatch one snapshot to the right transform and write."""
     if snapshot.source == "sleeper" and snapshot.kind in _SLEEPER_KIND_CATEGORY:
         stat_rows, adp_rows = sleeper_stat_rows(payload, snapshot)
-        return write_stat_lines(session, stat_rows), write_adp(session, adp_rows)
+        p, a = write_stat_rows(session, stat_rows)
+        return LoadResult(p, a, write_adp(session, adp_rows))
     if snapshot.source == "espn" and snapshot.kind == "kona":
         resolver = resolver or SleeperIdResolver.from_session(session)
-        rows = espn_stat_rows(payload, snapshot, resolver)
-        n = write_stat_lines(session, rows)
+        p, a = write_stat_rows(session, espn_stat_rows(payload, snapshot, resolver))
         if resolver.unresolved:
             log.warning(
                 "espn snapshot %s: %d espn ids unresolved to sleeper_id (rows kept, NULL id)",
                 snapshot.id,
                 len(resolver.unresolved),
             )
-        return n, 0
-    raise ValueError(
-        f"snapshot {snapshot.id} ({snapshot.source}/{snapshot.kind}) is not a stat feed"
-    )
+        return LoadResult(p, a, 0)
+    raise ValueError(f"snapshot {snapshot.id} ({snapshot.source}/{snapshot.kind}): not a stat feed")
 
 
 def loaded_snapshot_ids(session: Session) -> set[int]:
-    return set(session.scalars(select(StatLine.snapshot_id).distinct()))
+    """Snapshots that have contributed rows to either table."""
+    ids = set(session.scalars(select(Projection.snapshot_id).distinct()))
+    ids |= set(session.scalars(select(Actual.snapshot_id).distinct()))
+    return ids
 
 
 STAT_KINDS = ("projections_season", "projections_week", "stats_season", "stats_week", "kona")

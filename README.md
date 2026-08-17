@@ -25,7 +25,7 @@ lazy db upgrade                                          # alembic upgrade head
 
 lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
 lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
-lazy load stats                                          # → core.stat_lines (proj + actual) / core.adp
+lazy load stats                                          # → core.projections / core.actuals / core.adp
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -39,7 +39,7 @@ external source → HttpClient → validate (shape + count) → SnapshotStore
                                                             ├─ data/snapshots/**/*.gz   (local, gitignored)
                                                             ├─ Supabase Storage          (mirror, when configured)
                                                             └─ raw.snapshots             (metadata row in Postgres)
-                                          loaders → core.*  (players, crosswalk, stat_lines, adp, …)
+                                          loaders → core.*  (players, crosswalk, projections, actuals, adp)
 ```
 
 - **Snapshots are immutable and dated.** Every external pull is kept forever; providers revise their data
@@ -48,10 +48,12 @@ external source → HttpClient → validate (shape + count) → SnapshotStore
 - **Raw payloads never go into Postgres.** ~118 MB/day raw → ~15 MB gzipped on disk/Storage; Postgres holds
   metadata + narrow parsed tables. Fits the Supabase free tier for a season.
 - **Plain Postgres schema** (`raw`, `core`, `derived`) — the same Alembic migrations run on Docker and Supabase.
-- **One stat vocabulary.** `core.stat_lines.stats` is JSONB keyed by Sleeper stat names — the same names the
-  league's `scoring_settings` map uses — so any row (Sleeper/ESPN, projection/actual) scores the same way.
-  ESPN's numeric stat ids are decoded on load (`ingest/espn_stats.py`, verified against nflverse actuals).
-  Rows are per-snapshot so provider revisions stay visible; `category` = `proj` | `actual`, `week` NULL = season.
+- **One stat vocabulary, two tables.** `core.projections` and `core.actuals` share a `stats` JSONB column keyed
+  by Sleeper stat names — the same names the league's `scoring_settings` map uses — so any row from any
+  provider scores the same way. ESPN's numeric stat ids are decoded on load (`ingest/espn_stats.py`, verified
+  against nflverse actuals). **Projections are vintages** (one row per snapshot, kept forever); **actuals are
+  facts** (one row per source/season/week/player, latest load wins). `week` NULL = season. Rows with no
+  stat content are dropped at load.
 
 ## Layout
 

@@ -9,8 +9,9 @@ lazy pull nflverse 2025         # weekly stats + snap counts
 lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
 lazy load players               # latest valid players snapshot → core.players
 lazy load crosswalk
-lazy load stats                 # valid, not-yet-loaded proj/actual snapshots → core.stat_lines/adp
+lazy load stats                 # valid, not-yet-loaded snapshots → core.projections/actuals/adp
 lazy load stats --source sleeper --season 2026   # only matching snapshots
+lazy snapshots reindex          # re-register local archive files after a DB reset
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -191,6 +192,20 @@ def backfill(
     typer.echo(f"backfilled {len(rows)} snapshots from {directory}")
 
 
+# --- snapshots -------------------------------------------------------------
+snap_app = typer.Typer(no_args_is_help=True)
+app.add_typer(snap_app, name="snapshots", help="Archive maintenance")
+
+
+@snap_app.command("reindex")
+def snapshots_reindex() -> None:
+    """Register archive files missing from raw.snapshots (rebuild after a DB reset)."""
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        registered, skipped = ctx.puller(s).reindex()
+    typer.echo(f"reindexed {registered} snapshots ({skipped} already registered)")
+
+
 # --- load ------------------------------------------------------------------
 @load_app.command("players")
 def load_players_cmd() -> None:
@@ -222,9 +237,9 @@ def load_stats_cmd(
     latest_only: bool = typer.Option(
         False, help="Only the latest snapshot per (source, kind, season, week)"
     ),
-    reload: bool = typer.Option(False, help="Re-load snapshots already present in core.stat_lines"),
+    reload: bool = typer.Option(False, help="Re-load snapshots already loaded"),
 ) -> None:
-    """Load Sleeper projections/stats and ESPN kona snapshots into core.stat_lines + core.adp."""
+    """Load Sleeper projections/stats + ESPN kona snapshots into core.projections/actuals/adp."""
     from sqlalchemy import select
 
     from lazy_sleeper.db.models import Snapshot
@@ -246,22 +261,19 @@ def load_stats_cmd(
             snaps = list(latest.values())
         already = set() if reload else loaded_snapshot_ids(s)
         resolver = SleeperIdResolver.from_session(s)
-        total_stats = total_adp = done = 0
+        tp = ta = tadp = done = 0
         for snap in snaps:
             if snap.id in already:
                 continue
-            n_stats, n_adp = load_stat_snapshot(
-                s, snap, ctx.store.read(snap.storage_path), resolver
-            )
+            r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver)
             done += 1
-            total_stats += n_stats
-            total_adp += n_adp
+            tp, ta, tadp = tp + r.projections, ta + r.actuals, tadp + r.adp
             typer.echo(
                 f"  {snap.source}/{snap.kind} s={snap.season} w={snap.week} -> "
-                f"{n_stats} stat lines, {n_adp} adp"
+                f"{r.projections} proj, {r.actuals} actual, {r.adp} adp"
             )
     typer.echo(
-        f"loaded {done} snapshots: {total_stats} stat lines, {total_adp} adp rows"
+        f"loaded {done} snapshots: {tp} projections, {ta} actuals, {tadp} adp rows"
         + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
     )
 
