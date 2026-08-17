@@ -69,6 +69,7 @@ lazy score preview --position RB --top 20                # score latest 2026 pro
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
 lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
 lazy check freshness && lazy check joins                 # data-quality audit (see below)
+lazy check player "ja'marr chase" -t CIN                 # one-player dossier: ids, projections vs ours, actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -113,7 +114,7 @@ takes seconds; together they cover freshness, identity joins, and scoring.
 | 5 | `lazy score preview --position K --top 10` and `--source espn` | Sleeper and ESPN top kickers within ~5% of each other (Sleeper is imputed — see CLAUDE.md) | Sleeper far below ESPN = the imputation isn't firing (keys changed). |
 | 6 | `lazy score preview --position DEF --source espn --top 10` and `lazy score def-rank` | Plausible DEF order; ESPN season DEF 120–160 pts; def-rank top ~10 ppg | Sleeper DEF is expected to be ~20% low (no points-allowed data) — don't use it for DEF totals. |
 | 7 | `lazy score parity` | mean \|Δ\| < 0.02, only −2.00 residuals (return fumbles) | Anything else = the engine or the nflverse loader changed → the parity test in CI should also be red. |
-| 8 | Spot-check 3 players by hand | Pick a QB, a rookie WR, and a K; compare `lazy score preview` vs Sleeper's app projection and the crosswalk row (`select * from core.crosswalk where sleeper_id=…`) | Off by a fixed ratio → scoring; off entirely → identity. |
+| 8 | `lazy check player "trey smack" -t GB` (repeat for a star QB and a rookie WR; `--weeks` adds weekly rows) | One `players` row with the right team/position; crosswalk present with matching sportradar id (or `ABSENT` for a rookie, with ESPN/nflverse rows still attached via the name tier); every source's projection scores close to `provider` for offense; actuals `ours` == `provider` for nflverse | Wrong person attached (different src id / sportradar mismatch) → identity bug; right person, wrong points → scoring/vocabulary bug. Compare the Sleeper season row against the number in the Sleeper app. |
 
 Known, accepted misses (as of 2026-08-17): top-300 miss #104 Thomas Odukoya (free-agent TE, Sleeper
 `search_rank` artefact, no team — no impact); 3 sportradar conflicts on same-name players (Greg Jones,
@@ -129,7 +130,7 @@ lazy_sleeper/
   ingest/       http, sleeper, espn, nflverse clients; snapshots; validate; loaders; pipeline
   jobs/cli.py   `lazy` CLI
   api/          FastAPI app (health, snapshots; board/draft endpoints arrive in M3/M4)
-  ingest/audit  data-quality queries behind `lazy check joins|freshness`
+  ingest/audit  data-quality queries behind `lazy check joins|freshness|player`
   scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook),
                 kicking (FG distance-mix normalizer), defense (brackets/TD roll-ups + streaming rank),
                 league (rules + distributions from DB), parity (engine vs nflverse PPR)

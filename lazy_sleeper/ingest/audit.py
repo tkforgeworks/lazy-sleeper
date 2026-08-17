@@ -313,3 +313,90 @@ def counts(session: Session) -> Counts:
         adp=session.scalar(select(func.count()).select_from(Adp)) or 0,
         adp_resolved=session.scalar(select(func.count(Adp.sleeper_id))) or 0,
     )
+
+
+# --- single-player dossier ---------------------------------------------------------
+
+
+@dataclass
+class PlayerDossier:
+    player: Player
+    crosswalk: Crosswalk | None
+    projections: list[dict[str, Any]]  # latest vintage per (source, season, week) + our score
+    actuals: list[dict[str, Any]]  # per source: seasons, games, provider pts, our pts
+    adp: dict[str, Any] | None
+
+
+def find_players(session: Session, name: str, team: str | None = None) -> list[Player]:
+    """Players whose normalized name matches `name` (exact) or contains it; team narrows."""
+    from lazy_sleeper.ingest.stat_loaders import normalize_name
+
+    if name.isdigit():
+        p = session.get(Player, name)
+        return [p] if p else []
+    want = normalize_name(name)
+    stmt = select(Player).where(Player.full_name.is_not(None))
+    if team:
+        stmt = stmt.where(Player.team == team.upper())
+    hits = [p for p in session.scalars(stmt) if want and want in normalize_name(p.full_name)]
+    exact = [p for p in hits if normalize_name(p.full_name) == want]
+    hits = exact or hits
+    return sorted(hits, key=lambda p: (p.search_rank or 10**9, p.sleeper_id))
+
+
+def player_dossier(session: Session, player: Player, scorer: Any) -> PlayerDossier:
+    xw = session.get(Crosswalk, player.sleeper_id)
+    latest: dict[tuple[str, int, int | None], Projection] = {}
+    for pr in session.scalars(
+        select(Projection)
+        .where(Projection.sleeper_id == player.sleeper_id)
+        .order_by(Projection.snapshot_id.desc())
+    ):
+        latest.setdefault((pr.source, pr.season, pr.week), pr)
+    projections = [
+        {
+            "source": pr.source,
+            "season": pr.season,
+            "week": pr.week,
+            "source_player_id": pr.source_player_id,
+            "team": pr.team,
+            "provider_points": pr.provider_points,
+            "our_points": scorer.score(pr.stats, pr.position or player.position),
+            "snapshot_id": pr.snapshot_id,
+        }
+        for (_, _, _), pr in sorted(
+            latest.items(), key=lambda kv: (kv[0][0], -kv[0][1], kv[0][2] or 0)
+        )
+        if pr.week is None or pr.season >= 2026
+    ]
+    actuals: dict[tuple[str, int], dict[str, Any]] = {}
+    for a in session.scalars(
+        select(Actual).where(Actual.sleeper_id == player.sleeper_id, Actual.week.is_not(None))
+    ):
+        d = actuals.setdefault(
+            (a.source, a.season),
+            {
+                "source": a.source,
+                "season": a.season,
+                "source_player_id": a.source_player_id,
+                "games": 0,
+                "provider_points": 0.0,
+                "our_points": 0.0,
+            },
+        )
+        d["games"] += 1
+        d["provider_points"] += a.provider_points or 0.0
+        d["our_points"] += scorer.score(a.stats, a.position or player.position)
+    adp_row = session.scalars(
+        select(Adp).where(Adp.sleeper_id == player.sleeper_id).order_by(Adp.season.desc()).limit(1)
+    ).first()
+    adp = None
+    if adp_row is not None:
+        adp = {c.name: getattr(adp_row, c.name) for c in Adp.__table__.columns}
+    return PlayerDossier(
+        player,
+        xw,
+        projections,
+        [actuals[k] for k in sorted(actuals, key=lambda k: (k[0], -k[1]))],
+        adp,
+    )

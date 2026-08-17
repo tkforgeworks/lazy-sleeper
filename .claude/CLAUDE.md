@@ -42,7 +42,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   (name, position, team) match on `core.players` when unique (`stat_loaders.normalize_name`; audited via
   `resolver.resolved_by_name`) — needed for 2026 rookies (Smack/Smyth/Zvada Ks) until the crosswalk catches
   up. DEF via proTeamId → team abbr == Sleeper DEF id (32/32 verified, LS-22).
-- `lazy check joins` / `lazy check freshness` (`ingest/audit.py`) are the data-quality gate — README §"Data
+- `lazy check joins|freshness|player <name> -t TEAM` (`ingest/audit.py`) are the data-quality gate — README §"Data
   quality" has the manual checklist + accepted misses. Baseline 2026-08-17: Sleeper 100%, ESPN 99.9%,
   nflverse 99.8% resolved; top-300 299/300; 0 duplicates.
 - Validate shape/count on ingest; failed validation is still stored (`valid=false`) and loaders skip it.
