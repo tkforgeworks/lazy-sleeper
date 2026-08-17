@@ -59,6 +59,11 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   no points-allowed data** and only TD sub-keys — never imputed, so Sleeper DEF totals run ~20% under
   ESPN's; LS-25 must not blend them naively. Streaming rank v1 (`streaming_ranks`, `lazy score def-rank`)
   = mean league pts/game over ESPN weekly DEF actuals 2024–25 (nflverse team stats aren't ingested).
+- Parity (LS-21): `tests/test_scoring_parity.py` scores all 5,712 2025 weekly offense actuals from a
+  77 KB gz fixture vs nflverse `fantasy_points_ppr` — mean |Δ| 0.0098 after the three known map diffs
+  (`scoring/league.py::NFLVERSE_PPR_DIFFS`: INT −1 vs −2; FR-TD +6 vs 0; nflverse doesn't charge fumbles
+  lost on returns — the 28 residuals, all exactly −2). Regenerate the fixture each season with
+  `lazy score parity --write-fixture tests/fixtures/nflverse_actuals_2025_weekly.json.gz`.
 - Join spine = dynastyprocess crosswalk on `sleeper_id`; `sportradar_id` is the verification key. Sleeper's
   own espn/gsis/yahoo ids are sparse — don't rely on them. CSVs from R use `NA` for null.
 - Verified asset names live in `lazy_sleeper/ingest/nflverse.py` docstring (stats_player_week_YYYY, etc.).

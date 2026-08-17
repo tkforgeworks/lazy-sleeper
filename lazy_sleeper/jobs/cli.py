@@ -356,6 +356,41 @@ def score_def_rank(
         typer.echo(f"{r.rank:<5}{r.team:<5}{r.games:>6}{r.ppg:>7.2f}")
 
 
+@score_app.command("parity")
+def score_parity(
+    season: int = typer.Option(2025),
+    write_fixture: str | None = typer.Option(None, help="Also write rows as a gzip JSON fixture"),
+) -> None:
+    """Engine vs nflverse fantasy_points_ppr on weekly offense actuals (known diffs adjusted)."""
+    import gzip
+    import json
+
+    from lazy_sleeper.scoring import default_scorer, load_league_rules
+    from lazy_sleeper.scoring.league import parity_rows
+    from lazy_sleeper.scoring.parity import parity
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rules = load_league_rules(s, ctx.store)
+        rows = parity_rows(s, rules, season)
+    rep = parity(rows, default_scorer(rules))
+    typer.echo(f"{len(rows)} rows, mean |Δ| = {rep.mean_abs_delta:.4f}")
+    for pos, m in rep.mean_by_position().items():
+        typer.echo(f"  {pos:<3} n={len(rep.by_position[pos]):<5} mean |Δ| = {m:.4f}")
+    typer.echo(f"  outliers (>0.05): {len(rep.outliers)}")
+    for o in rep.outliers[:10]:
+        typer.echo(
+            f"    wk{o['week']:<3}{o['position']:<3}{o['source_player_id']:<12}"
+            f"league={o['league_points']:.2f} nflverse={o['provider_points']:.2f} "
+            f"Δ={o['delta']:+.2f}"
+        )
+    if write_fixture:
+        Path(write_fixture).write_bytes(
+            gzip.compress(json.dumps(rows, separators=(",", ":")).encode(), 9)
+        )
+        typer.echo(f"wrote {len(rows)} rows → {write_fixture}")
+
+
 @score_app.command("preview")
 def score_preview(
     season: int = typer.Option(2026),
