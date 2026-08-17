@@ -59,6 +59,8 @@ lazy db upgrade                                          # alembic upgrade head
 lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
 lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
 lazy load stats                                          # → core.projections/actuals/adp/snap_counts/expected_points
+lazy score rules                                         # the league's scoring_settings (latest league snapshot)
+lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
 ```
 
@@ -96,9 +98,10 @@ lazy_sleeper/
   config.py     Settings (env / .env)
   db/           SQLAlchemy models + session factory        alembic/   migrations
   ingest/       http, sleeper, espn, nflverse clients; snapshots; validate; loaders; pipeline
-  jobs/cli.py   `ls` CLI
+  jobs/cli.py   `lazy` CLI
   api/          FastAPI app (health, snapshots; board/draft endpoints arrive in M3/M4)
-  scoring/ metrics/ providers/ model/ benchmark/   (M1+)
+  scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook)
+  metrics/ providers/ model/ benchmark/   (M1+)
 tests/          unit tests + trimmed real-payload fixtures
 ```
 

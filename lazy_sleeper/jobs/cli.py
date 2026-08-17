@@ -301,3 +301,68 @@ def db_downgrade(revision: str = "-1") -> None:
 
 if __name__ == "__main__":
     app()
+
+
+# --- score -----------------------------------------------------------------
+score_app = typer.Typer(no_args_is_help=True)
+app.add_typer(score_app, name="score", help="Apply league scoring to stat lines")
+
+
+@score_app.command("rules")
+def score_rules() -> None:
+    """Print the league scoring map from the latest league snapshot."""
+    from lazy_sleeper.scoring import load_league_rules
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rules = load_league_rules(s, ctx.store)
+    typer.echo(f"{rules.league_name} ({rules.league_id}) roster={' '.join(rules.roster_positions)}")
+    for k, v in sorted(rules.weights.items()):
+        typer.echo(f"  {k:<18}{v:>7g}")
+
+
+@score_app.command("preview")
+def score_preview(
+    season: int = typer.Option(2026),
+    week: int | None = typer.Option(None, help="Omit for season totals"),
+    source: str = typer.Option("sleeper", help="sleeper | espn"),
+    position: str | None = typer.Option(None, help="QB | RB | WR | TE | K | DEF"),
+    top: int = typer.Option(25),
+    actuals: bool = typer.Option(False, help="Score core.actuals instead of projections"),
+) -> None:
+    """Score the latest projection vintage (or actuals) and list the top players."""
+    from sqlalchemy import select
+
+    from lazy_sleeper.db.models import Actual, Player, Projection
+    from lazy_sleeper.scoring import Scorer, load_league_rules
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        scorer = Scorer(load_league_rules(s, ctx.store))
+        model = Actual if actuals else Projection
+        stmt = select(model).where(
+            model.source == source,
+            model.season == season,
+            model.week.is_(None) if week is None else model.week == week,
+        )
+        if position:
+            stmt = stmt.where(model.position == position)
+        rows = list(s.scalars(stmt))
+        if not actuals and rows:
+            latest = max(r.snapshot_id for r in rows)
+            rows = [r for r in rows if r.snapshot_id == latest]
+        names = dict(
+            s.execute(
+                select(Player.sleeper_id, Player.full_name).where(
+                    Player.sleeper_id.in_({r.sleeper_id for r in rows if r.sleeper_id})
+                )
+            ).all()
+        )
+        scored = sorted(((scorer.score(r.stats, r.position), r) for r in rows), key=lambda t: -t[0])
+        typer.echo(f"{'pos':<4}{'team':<5}{'player':<26}{'pts':>8}{'provider':>10}")
+        for pts, r in scored[:top]:
+            name = names.get(r.sleeper_id or "", r.source_player_id)
+            prov = f"{r.provider_points:.1f}" if r.provider_points is not None else "-"
+            typer.echo(
+                f"{r.position or '':<4}{r.team or '':<5}{name[:25]:<26}{pts:>8.1f}{prov:>10}"
+            )

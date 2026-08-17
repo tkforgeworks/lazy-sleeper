@@ -20,3 +20,10 @@ def espn_kona_payload() -> bytes:
 @pytest.fixture
 def sleeper_players_payload() -> bytes:
     return (FIXTURES / "sleeper_players_sample.json").read_bytes()
+
+
+@pytest.fixture
+def sleeper_league_payload() -> dict:
+    import json
+
+    return json.loads((FIXTURES / "sleeper_league_sample.json").read_text())
