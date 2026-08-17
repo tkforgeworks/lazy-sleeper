@@ -172,6 +172,55 @@ class Puller:
             ext="csv",
         )
 
+    # --- reindex: rebuild raw.snapshots from the local archive ------------------
+    _PATH = re.compile(
+        r"^(?P<source>[a-z]+)/(?P<kind>[a-z_]+)/(?P<season>\d{4}|na)/(?P<week>\d{2}|na)/"
+        r"(?P<stamp>\d{8}T\d{6}Z)\.(?P<ext>json|csv)\.gz$"
+    )
+    _VALIDATORS: dict[tuple[str, str], Validator] = {
+        ("sleeper", "projections_season"): validate_sleeper_projections,
+        ("sleeper", "projections_week"): validate_sleeper_projections,
+        ("sleeper", "stats_season"): validate_sleeper_projections,
+        ("sleeper", "stats_week"): validate_sleeper_projections,
+        ("sleeper", "players"): validate_sleeper_players,
+        ("espn", "kona"): validate_espn_kona,
+    }
+
+    def reindex(self) -> tuple[int, int]:
+        """Register archive files that have no raw.snapshots row (e.g. after a DB rebuild).
+
+        Returns (registered, skipped). Validation is re-run; CSV kinds get a shape-only check.
+        """
+        from sqlalchemy import select
+
+        known = set(self._session.scalars(select(Snapshot.storage_path)))
+        registered = skipped = 0
+        for f in sorted(self._store.root.rglob("*.gz")):
+            rel = f.relative_to(self._store.root).as_posix()
+            if rel in known:
+                skipped += 1
+                continue
+            m = self._PATH.match(rel)
+            if not m:
+                log.warning("reindex: unrecognized path %s", rel)
+                continue
+            key = SnapshotKey(
+                m["source"],
+                m["kind"],
+                None if m["season"] == "na" else int(m["season"]),
+                None if m["week"] == "na" else int(m["week"]),
+            )
+            pulled_at = datetime.strptime(m["stamp"], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            payload = self._store.read(rel)
+            validator = self._VALIDATORS.get(
+                (key.source, key.kind), validate_csv if m["ext"] == "csv" else validate_json_any
+            )
+            self._repo.add(
+                self._store.record_existing(key, payload, rel, pulled_at, validator(payload))
+            )
+            registered += 1
+        return registered, skipped
+
     # --- backfill of the PowerShell-era archive -------------------------------
     _SLEEPER_SEASON = re.compile(r"^sleeper_proj_(\d{4})_season\.json$")
     _SLEEPER_WEEK = re.compile(r"^sleeper_proj_(\d{4})_wk(\d{2})\.json$")

@@ -1,15 +1,18 @@
-"""`ls` command-line entrypoint (installed via pyproject [project.scripts]).
+"""`lazy` command-line entrypoint (installed via pyproject [project.scripts]).
 
-ls pull daily                 # players + 2026 season projections + ESPN 2026 + crosswalk
-ls pull projections 2025 --week 3
-ls pull espn 2026
-ls pull league                # league, users, rosters, draft, draft picks
-ls pull picks                 # just draft picks (poll target for draft night)
-ls pull nflverse 2025         # weekly stats + snap counts
-ls backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
-ls load players               # latest valid players snapshot → core.players
-ls load crosswalk
-ls db upgrade                 # alembic upgrade head
+lazy pull daily                 # players + 2026 season projections + ESPN 2026 + crosswalk
+lazy pull projections 2025 --week 3
+lazy pull espn 2026
+lazy pull league                # league, users, rosters, draft, draft picks
+lazy pull picks                 # just draft picks (poll target for draft night)
+lazy pull nflverse 2025         # weekly stats + snap counts
+lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
+lazy load players               # latest valid players snapshot → core.players
+lazy load crosswalk
+lazy load stats                 # valid, not-yet-loaded snapshots → core.projections/actuals/adp
+lazy load stats --source sleeper --season 2026   # only matching snapshots
+lazy snapshots reindex          # re-register local archive files after a DB reset
+lazy db upgrade                 # alembic upgrade head
 """
 
 from __future__ import annotations
@@ -33,6 +36,12 @@ from lazy_sleeper.ingest.snapshots import (
     SnapshotRepository,
     SnapshotStore,
     SupabaseStorage,
+)
+from lazy_sleeper.ingest.stat_loaders import (
+    STAT_KINDS,
+    SleeperIdResolver,
+    load_stat_snapshot,
+    loaded_snapshot_ids,
 )
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -183,6 +192,20 @@ def backfill(
     typer.echo(f"backfilled {len(rows)} snapshots from {directory}")
 
 
+# --- snapshots -------------------------------------------------------------
+snap_app = typer.Typer(no_args_is_help=True)
+app.add_typer(snap_app, name="snapshots", help="Archive maintenance")
+
+
+@snap_app.command("reindex")
+def snapshots_reindex() -> None:
+    """Register archive files missing from raw.snapshots (rebuild after a DB reset)."""
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        registered, skipped = ctx.puller(s).reindex()
+    typer.echo(f"reindexed {registered} snapshots ({skipped} already registered)")
+
+
 # --- load ------------------------------------------------------------------
 @load_app.command("players")
 def load_players_cmd() -> None:
@@ -190,7 +213,7 @@ def load_players_cmd() -> None:
     with session_scope(ctx.sessions) as s:
         snap = SnapshotRepository(s).latest(SnapshotKey("sleeper", "players"))
         if snap is None:
-            raise typer.BadParameter("no valid players snapshot; run `ls pull players` first")
+            raise typer.BadParameter("no valid players snapshot; run `lazy pull players` first")
         n = load_players(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} players from snapshot {snap.id}")
 
@@ -201,9 +224,58 @@ def load_crosswalk_cmd() -> None:
     with session_scope(ctx.sessions) as s:
         snap = SnapshotRepository(s).latest(SnapshotKey("nflverse", "crosswalk"))
         if snap is None:
-            raise typer.BadParameter("no valid crosswalk snapshot; run `ls pull crosswalk` first")
+            raise typer.BadParameter("no valid crosswalk snapshot; run `lazy pull crosswalk` first")
         n = load_crosswalk(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} crosswalk rows from snapshot {snap.id}")
+
+
+@load_app.command("stats")
+def load_stats_cmd(
+    source: str | None = typer.Option(None, help="sleeper | espn"),
+    season: int | None = typer.Option(None),
+    week: int | None = typer.Option(None),
+    latest_only: bool = typer.Option(
+        False, help="Only the latest snapshot per (source, kind, season, week)"
+    ),
+    reload: bool = typer.Option(False, help="Re-load snapshots already loaded"),
+) -> None:
+    """Load Sleeper projections/stats + ESPN kona snapshots into core.projections/actuals/adp."""
+    from sqlalchemy import select
+
+    from lazy_sleeper.db.models import Snapshot
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        stmt = select(Snapshot).where(Snapshot.valid.is_(True), Snapshot.kind.in_(STAT_KINDS))
+        if source:
+            stmt = stmt.where(Snapshot.source == source)
+        if season is not None:
+            stmt = stmt.where(Snapshot.season == season)
+        if week is not None:
+            stmt = stmt.where(Snapshot.week == week)
+        snaps = list(s.scalars(stmt.order_by(Snapshot.pulled_at)))
+        if latest_only:
+            latest: dict[tuple, Snapshot] = {}
+            for snap in snaps:
+                latest[(snap.source, snap.kind, snap.season, snap.week)] = snap
+            snaps = list(latest.values())
+        already = set() if reload else loaded_snapshot_ids(s)
+        resolver = SleeperIdResolver.from_session(s)
+        tp = ta = tadp = done = 0
+        for snap in snaps:
+            if snap.id in already:
+                continue
+            r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver)
+            done += 1
+            tp, ta, tadp = tp + r.projections, ta + r.actuals, tadp + r.adp
+            typer.echo(
+                f"  {snap.source}/{snap.kind} s={snap.season} w={snap.week} -> "
+                f"{r.projections} proj, {r.actuals} actual, {r.adp} adp"
+            )
+    typer.echo(
+        f"loaded {done} snapshots: {tp} projections, {ta} actuals, {tadp} adp rows"
+        + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
+    )
 
 
 # --- db --------------------------------------------------------------------

@@ -128,6 +128,27 @@ class SnapshotStore:
             meta=meta or {},
         )
 
+    def record_existing(
+        self,
+        key: SnapshotKey,
+        payload: bytes,
+        storage_path: str,
+        pulled_at: datetime,
+        validation: Any,
+    ) -> SnapshotRecord:
+        """Build a record for a file already in the archive (reindex path; no write, no upload)."""
+        return SnapshotRecord(
+            key=key,
+            pulled_at=pulled_at,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            byte_size=len(payload),
+            storage_path=storage_path,
+            record_count=getattr(validation, "record_count", None),
+            valid=getattr(validation, "valid", True),
+            validation_notes=getattr(validation, "notes", None),
+            meta={"reindexed": True},
+        )
+
     def read(self, storage_path: str) -> bytes:
         return gzip.decompress((self._root / storage_path).read_bytes())
 

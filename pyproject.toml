@@ -33,7 +33,7 @@ dev = [
 ]
 
 [project.scripts]
-ls = "lazy_sleeper.jobs.cli:app"
+lazy = "lazy_sleeper.jobs.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lazy_sleeper"]

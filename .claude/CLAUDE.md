@@ -13,7 +13,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Stack (decided 2026-08-16)
 
-- Python ≥3.12, hatchling, ruff (line 100), pytest. CLI entrypoint `ls` (`lazy_sleeper.jobs.cli`).
+- Python ≥3.12, hatchling, ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid shadowing the shell command.
 - Postgres via SQLAlchemy 2 + Alembic. Local: `docker compose up -d` (port 5433). Hosted target: Supabase
   free tier (Pro is an accepted fallback). Schemas `raw` / `core` / `derived`; plain Postgres only, no
   local-only extensions — migrations must run unchanged on Supabase.
@@ -26,7 +26,13 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 - Every external pull → `SnapshotStore` (gzip → `data/snapshots/`, mirrored to Supabase Storage when
   configured) + a `raw.snapshots` metadata row. Snapshots are immutable and dated; never overwrite.
-- Raw payloads never go into Postgres (118 MB/day raw). Parsed, narrow tables live in `core.*`.
+- Raw payloads never go into Postgres (118 MB/day raw). Parsed tables live in `core.*`:
+  `players`, `crosswalk`, `projections` (per-snapshot *vintages*), `actuals` (*facts*: unique per
+  source/season/week/player, latest wins), `adp` (Sleeper market data per season snapshot). Projections and
+  actuals share the `stats` JSONB column in Sleeper vocabulary; `week` NULL = season; empty rows dropped.
+- ESPN stat ids → Sleeper keys via `ingest/espn_stats.py` (empirically verified 2026-08-16). Where ESPN buckets
+  don't align (K <40 yd; DEF pts-allowed 14-17/18-21/22-27/35-45/46+) the ESPN-native key is kept, not merged.
+- ESPN espn_id → sleeper_id via crosswalk (authoritative) then `core.players.espn_id`; DEF via proTeamId → team abbr.
 - Validate shape/count on ingest; failed validation is still stored (`valid=false`) and loaders skip it.
 - Stat-level everything: never ingest pre-scored fantasy points as truth; the scoring engine (M1) applies
   the league's literal `scoring_settings` map.
