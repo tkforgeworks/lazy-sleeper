@@ -50,7 +50,15 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   (`DEFAULT_MIX`, refresh via `lazy score kmix` after each season). **Sleeper season K projections omit
   all <40-yd FGs and the `fgm` total** — treated as unobserved and imputed from the long range (lands
   within ~2% of ESPN). Misses/XP-misses are inferred from `fga-fgm` / `xpa-xpm`, never imputed.
-  Use `default_scorer(rules)` (wires K; DEF joins in LS-20), not bare `Scorer`.
+  Use `default_scorer(rules)` (wires K + DEF normalizers), not bare `Scorer`.
+- DEF (LS-20): `scoring/defense.py`. Points-allowed keys parsed as intervals; ESPN's `18_21` straddles the
+  league's 14_20|21_27 edge and is split by `DEFAULT_PA_PMF` (ESPN weekly actuals 2024–25); single-game
+  rows with integral `pts_allow` bucket exactly. TD roll-ups: `def_td = max(def_td, def_fum_td +
+  def_int_td|pass_int_td)`; ESPN `def_st_td` is blocked-kick TDs only, so returns (`def_kr_td`/`def_pr_td`
+  or `kr_td`/`pr_td`) are added unless already covered. **Sleeper DEF projections (season + weekly) carry
+  no points-allowed data** and only TD sub-keys — never imputed, so Sleeper DEF totals run ~20% under
+  ESPN's; LS-25 must not blend them naively. Streaming rank v1 (`streaming_ranks`, `lazy score def-rank`)
+  = mean league pts/game over ESPN weekly DEF actuals 2024–25 (nflverse team stats aren't ingested).
 - Join spine = dynastyprocess crosswalk on `sleeper_id`; `sportradar_id` is the verification key. Sleeper's
   own espn/gsis/yahoo ids are sparse — don't rely on them. CSVs from R use `NA` for null.
 - Verified asset names live in `lazy_sleeper/ingest/nflverse.py` docstring (stats_player_week_YYYY, etc.).
