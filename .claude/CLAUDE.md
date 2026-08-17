@@ -44,7 +44,13 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   literal `scoring_settings` map (`ScoringRules.from_league` → `Scorer.score(stats, position)`), i.e.
   `Σ weight[k]·stats[k]` — no hardcoded constants. K/DEF plug in as `Scorer.normalizers` (LS-19/20).
   Evidence: Sleeper's *weekly* QB `pts_ppr` implies 0.05/pass yd vs its own 0.04 map; season totals match.
-  `provider_points` on rows is an x-check only. `lazy score rules|preview` for eyeballing.
+  `provider_points` on rows is an x-check only. `lazy score rules|preview|kmix` for eyeballing.
+- K (LS-19): `scoring/kicking.py` re-expresses any FG line in league buckets by parsing keys as yard
+  intervals; coarse ranges (`fgm`, `fgm_0_39`, `fgm_50p`) split by the 2023–25 nflverse distance mix
+  (`DEFAULT_MIX`, refresh via `lazy score kmix` after each season). **Sleeper season K projections omit
+  all <40-yd FGs and the `fgm` total** — treated as unobserved and imputed from the long range (lands
+  within ~2% of ESPN). Misses/XP-misses are inferred from `fga-fgm` / `xpa-xpm`, never imputed.
+  Use `default_scorer(rules)` (wires K; DEF joins in LS-20), not bare `Scorer`.
 - Join spine = dynastyprocess crosswalk on `sleeper_id`; `sportradar_id` is the verification key. Sleeper's
   own espn/gsis/yahoo ids are sparse — don't rely on them. CSVs from R use `NA` for null.
 - Verified asset names live in `lazy_sleeper/ingest/nflverse.py` docstring (stats_player_week_YYYY, etc.).
@@ -59,8 +65,9 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 ## Repo / process
 
 - `main` is protected (org ruleset): PR-only, no force-push, no bypass. Branch from `main`, open PR,
-  self-merge OK. CI job name is `ci` (`.github/workflows/ci.yml`) — **once it has reported on a PR, PATCH the
-  ruleset to require it** (see org doc "Updating an existing ruleset"). Not yet done.
+  self-merge OK. CI job name is `ci` (`.github/workflows/ci.yml`) and is a **required status check** on the
+  repo ruleset `main` (id 20916324, non-strict; done 2026-08-17, LS-10). Editing the ruleset is a `PUT`
+  that replaces the whole `rules` array — fetch it first and resend all rules.
 - Commit subjects → release notes: `LS-N: Imperative summary`; bug fixes `LS-N: Fix ...`. Jira project
   "Lazy Sleeper", key `LS`. Epics LS-1..9 (E1..E9), stories LS-10..50 — key map in analysis doc §8.
   Fix versions: 0.1.0 draft / 0.2.0 season / 1.0.0 production. Layers are labels (no components).
