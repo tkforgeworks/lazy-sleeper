@@ -339,6 +339,23 @@ def score_kmix(
         typer.echo(f"{b:<8}{live.shares[b]:>9.4f}{DEFAULT_MIX.shares[b]:>9.4f}")
 
 
+@score_app.command("def-rank")
+def score_def_rank(
+    seasons: str = typer.Option("2024,2025", help="Comma-separated seasons of weekly DEF actuals"),
+    source: str = typer.Option("espn"),
+) -> None:
+    """Season-average DEF streaming rank (league points per game over the given seasons)."""
+    from lazy_sleeper.scoring import default_scorer, load_league_rules, streaming_ranks
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        scorer = default_scorer(load_league_rules(s, ctx.store))
+        ranks = streaming_ranks(s, scorer, tuple(int(x) for x in seasons.split(",")), source)
+    typer.echo(f"{'rank':<5}{'team':<5}{'games':>6}{'ppg':>7}")
+    for r in ranks:
+        typer.echo(f"{r.rank:<5}{r.team:<5}{r.games:>6}{r.ppg:>7.2f}")
+
+
 @score_app.command("preview")
 def score_preview(
     season: int = typer.Option(2026),
