@@ -9,7 +9,10 @@ FastAPI surface. The Flutter client lives in a separate repo (`lazy-sleeper-app`
 
 ## Status
 
-M0 (bootstrap) — ingestion + immutable snapshot archive + DB schema + CLI + CI. See
+**M0–M2 done (2026-08-19):** ingestion + immutable snapshot archive, league scoring engine (QB–DEF, parity
+vs nflverse), season + weekly provider benchmarks, provider abstraction + fitted ensemble weights, and the
+ops floor — shared Supabase Postgres (cut over 2026-08-19), archive mirrored to Supabase Storage, daily
+pull running from GitHub Actions. Next: M3 draft board (LS-26→30). See
 [`docs/execution-plan-analysis_20260816.md`](docs/execution-plan-analysis_20260816.md) for the milestone plan
 and [`docs/draft-companion-execution-plan_20260816.md`](docs/draft-companion-execution-plan_20260816.md) for
 the product/architecture spec.
@@ -58,21 +61,36 @@ seasons of history — Pro is the accepted fallback). One-time:
 1. Storage → **New bucket** `raw-snapshots`, private. (`SUPABASE_BUCKET` defaults to that name.)
 2. Project Settings → API Keys → create an `sb_secret_…` key → `SUPABASE_SECRET_KEY`; the project URL
    → `SUPABASE_URL`. The store mirrors every pull automatically once both are set.
-3. Project Settings → Database → connection string (**Session pooler**, port 5432, IPv4-friendly) →
+3. Project Settings → Database → connection string. Use the **Session pooler** (port 5432 — IPv4,
+   supports migrations); *not* the direct `db.<ref>.supabase.co` host (IPv6-only on free tier) and *not* the
+   transaction pooler `:6543?pgbouncer=true` (breaks Alembic). It's the **database** password (Settings →
+   Database → Reset database password if unsure), not your Supabase login. Swap the scheme to psycopg 3:
    `DATABASE_URL=postgresql+psycopg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`.
+4. Supabase's Security Advisor wants RLS on anything in `public`; migration `0005` enables it on
+   `public.alembic_version` and revokes the `anon`/`authenticated` grants (our `raw`/`core`/`derived` schemas
+   aren't exposed by PostgREST, so they don't trigger it).
 
-**Cut-over from a local Docker DB** (done once, from the machine that has the data; ~5 min):
+**Cut-over from a local Docker DB — done 2026-08-19** (kept as the recipe; the local DB is now just
+`DATABASE_URL_LOCAL` in `.env` for diffing):
 
 ```bash
-# 1. schema on Supabase
-DATABASE_URL="$SUPABASE_DB_URL" uv run lazy db upgrade
-# 2a. exact copy of the local DB (keeps snapshot ids, fitted weights, config) …
-docker compose exec -T db pg_dump -U lazysleeper --data-only --schema=raw --schema=core --schema=derived   lazysleeper | docker compose exec -T db psql "$SUPABASE_DB_URL_PSQL"      # postgresql://… form
+# 1. schema on Supabase (DATABASE_URL already pointing at it)
+uv run lazy db upgrade
+# 2a. exact copy of the local DB (keeps snapshot ids, fitted weights, config) — what was actually run:
+URL_PSQL=...   # DATABASE_URL with postgresql:// instead of postgresql+psycopg://
+docker compose exec -T db psql "$URL_PSQL" -c "delete from derived.ensemble_config"   # 0004 seeds a row
+docker compose exec -T db pg_dump -U lazysleeper --data-only --no-owner \
+  --schema=raw --schema=core --schema=derived lazysleeper > /tmp/dump.sql
+docker compose exec -T db psql "$URL_PSQL" -v ON_ERROR_STOP=1 -f - < /tmp/dump.sql
 # 2b. … or rebuild from the archive instead (slower, no pg tools needed)
-DATABASE_URL="$SUPABASE_DB_URL" uv run lazy snapshots reindex && uv run lazy load players &&   uv run lazy load crosswalk && uv run lazy load stats && uv run lazy benchmark fit-weights
-# 3. mirror the archive, then point .env at Supabase for good
-uv run lazy sync push && uv run lazy check freshness
+uv run lazy snapshots reindex && uv run lazy load players && uv run lazy load crosswalk && \
+  uv run lazy load stats && uv run lazy benchmark fit-weights
+# 3. mirror the archive and verify
+uv run lazy sync push && uv run lazy check freshness && uv run lazy check joins
 ```
+
+Verified after cut-over: identical row counts on every table (81 snapshots / 102,561 projections /
+32,692 actuals / weights v1), `check joins` baseline reproduced (top-300 299/300, 3 known conflicts).
 
 ### Daily pull — the scheduler is a GitHub Actions workflow (LS-17)
 
@@ -83,8 +101,10 @@ to `main` and tomorrow's pull runs it. Snapshots land in the bucket, rows in Sup
 runner's local archive is thrown away. A failed run is a red workflow + GitHub's failure email; the
 `Freshness audit` step is what to read when something looks off.
 
-Repository secrets it needs (Settings → Secrets and variables → Actions): `DATABASE_URL`, `SUPABASE_URL`,
-`SUPABASE_SECRET_KEY`, `SLEEPER_LEAGUE_ID`, `SLEEPER_DRAFT_ID`, `SLEEPER_USER_ID`. Caveats: GitHub cron is
+Repository secrets it needs (Settings → Secrets and variables → Actions — **set 2026-08-19**): `DATABASE_URL`,
+`SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SLEEPER_LEAGUE_ID`, `SLEEPER_DRAFT_ID`, `SLEEPER_USER_ID`. First manual
+run went green end-to-end on 2026-08-19 (Sleeper, ESPN kona, crosswalk all reachable from GitHub runners);
+the schedule takes it from here. Caveats: GitHub cron is
 best-effort (minutes of drift; the occasional skipped slot on busy hours — re-run by hand); scheduled
 workflows are disabled after 60 days without repo activity. Fallback if GitHub runner IPs ever get blocked
 by a provider: the same steps as a homelab k8s CronJob (image build in CI); the code path is identical.
