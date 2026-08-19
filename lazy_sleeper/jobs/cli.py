@@ -13,6 +13,9 @@ lazy load stats                 # not-yet-loaded snapshots → projections/actua
 lazy load stats --source sleeper --season 2026   # only matching snapshots
 lazy snapshots reindex          # re-register local archive files after a DB reset
 lazy benchmark season|weekly    # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/*.csv
+lazy benchmark fit-weights      # inverse-MAE blend weights → derived.ensemble_weights + JSON
+lazy weights show|set|clear|config   # fitted vs manual-override blend weights (the λ switch)
+lazy score preview --source ensemble # blended projections with each member's column
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -97,6 +100,32 @@ class _Ctx:
             espn=EspnClient(self.http),
             nflverse=NflverseClient(self.http),
         )
+
+    def scorer(self, session):  # noqa: ANN001, ANN201
+        from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+        return default_scorer(load_league_rules(session, self.store))
+
+    def provider(self, session, name: str):  # noqa: ANN001, ANN201
+        """`sleeper` | `espn` | `ensemble` — league-scored projections from stored vintages."""
+        from lazy_sleeper.providers import (
+            EnsembleProvider,
+            EspnProvider,
+            SleeperProvider,
+            WeightRepository,
+        )
+
+        scorer = self.scorer(session)
+        if name == "sleeper":
+            return SleeperProvider(session, scorer)
+        if name == "espn":
+            return EspnProvider(session, scorer)
+        if name == "ensemble":
+            return EnsembleProvider(
+                [SleeperProvider(session, scorer), EspnProvider(session, scorer)],
+                WeightRepository(session),
+            )
+        raise typer.BadParameter(f"unknown provider {name!r} (sleeper | espn | ensemble)")
 
 
 # --- pull ------------------------------------------------------------------
@@ -397,47 +426,61 @@ def score_parity(
 def score_preview(
     season: int = typer.Option(2026),
     week: int | None = typer.Option(None, help="Omit for season totals"),
-    source: str = typer.Option("sleeper", help="sleeper | espn"),
+    source: str = typer.Option("sleeper", help="sleeper | espn | ensemble"),
     position: str | None = typer.Option(None, help="QB | RB | WR | TE | K | DEF"),
     top: int = typer.Option(25),
     actuals: bool = typer.Option(False, help="Score core.actuals instead of projections"),
 ) -> None:
-    """Score the latest projection vintage (or actuals) and list the top players."""
+    """Score the latest projection vintage (via a provider) or actuals and list the top players."""
     from sqlalchemy import select
 
-    from lazy_sleeper.db.models import Actual, Player, Projection
-    from lazy_sleeper.scoring import default_scorer, load_league_rules
+    from lazy_sleeper.db.models import Actual, Player
 
     ctx = _Ctx()
     with session_scope(ctx.sessions) as s:
-        scorer = default_scorer(load_league_rules(s, ctx.store))
-        model = Actual if actuals else Projection
-        stmt = select(model).where(
-            model.source == source,
-            model.season == season,
-            model.week.is_(None) if week is None else model.week == week,
-        )
-        if position:
-            stmt = stmt.where(model.position == position)
-        rows = list(s.scalars(stmt))
-        if not actuals and rows:
-            latest = max(r.snapshot_id for r in rows)
-            rows = [r for r in rows if r.snapshot_id == latest]
+        if actuals:
+            scorer = ctx.scorer(s)
+            stmt = select(Actual).where(
+                Actual.source == source,
+                Actual.season == season,
+                Actual.week.is_(None) if week is None else Actual.week == week,
+            )
+            if position:
+                stmt = stmt.where(Actual.position == position)
+            scored = [
+                (
+                    scorer.score(r.stats, r.position),
+                    r.sleeper_id or r.source_player_id,
+                    r.position,
+                    r.team,
+                    r.provider_points,
+                    {},
+                )
+                for r in s.scalars(stmt)
+            ]
+        else:
+            provider = ctx.provider(s, source)
+            scored = [
+                (p.points, p.sleeper_id, p.position, p.team, p.provider_points, p.components)
+                for p in provider.projections(season, week)
+                if position is None or p.position == position
+            ]
+        scored.sort(key=lambda t: -t[0])
         names = dict(
             s.execute(
                 select(Player.sleeper_id, Player.full_name).where(
-                    Player.sleeper_id.in_({r.sleeper_id for r in rows if r.sleeper_id})
+                    Player.sleeper_id.in_({t[1] for t in scored[:top]})
                 )
             ).all()
         )
-        scored = sorted(((scorer.score(r.stats, r.position), r) for r in rows), key=lambda t: -t[0])
-        typer.echo(f"{'pos':<4}{'team':<5}{'player':<26}{'pts':>8}{'provider':>10}")
-        for pts, r in scored[:top]:
-            name = names.get(r.sleeper_id or "", r.source_player_id)
-            prov = f"{r.provider_points:.1f}" if r.provider_points is not None else "-"
-            typer.echo(
-                f"{r.position or '':<4}{r.team or '':<5}{name[:25]:<26}{pts:>8.1f}{prov:>10}"
-            )
+        members = sorted({k for t in scored[:top] for k in t[5]})
+        extra = "".join(f"{m:>9}" for m in members)
+        typer.echo(f"{'pos':<4}{'team':<5}{'player':<26}{'pts':>8}{'provider':>10}{extra}")
+        for pts, sid, pos, team, prov_pts, comps in scored[:top]:
+            name = names.get(sid, sid)
+            prov = f"{prov_pts:.1f}" if prov_pts is not None else "-"
+            comp = "".join(f"{comps[m]:>9.1f}" if m in comps else f"{'-':>9}" for m in members)
+            typer.echo(f"{pos or '':<4}{team or '':<5}{name[:25]:<26}{pts:>8.1f}{prov:>10}{comp}")
 
 
 # --- check -----------------------------------------------------------------
@@ -724,3 +767,140 @@ def benchmark_weekly(
     if players_out:
         report.write_players(players_out, detail)
         typer.echo(f"wrote {players_out}")
+
+
+WEIGHTS_JSON = Path("data/benchmarks/ensemble_weights.json")
+
+
+@bench_app.command("fit-weights")
+def benchmark_fit_weights(
+    season_csv: Annotated[Path, typer.Option(help="Season scoreboard CSV")] = SCOREBOARD_CSV,
+    weekly_csv: Annotated[Path, typer.Option(help="Weekly scoreboard CSV")] = WEEKLY_CSV,
+    out: Annotated[Path, typer.Option(help="Committed JSON artefact")] = WEIGHTS_JSON,
+    note: Annotated[str | None, typer.Option(help="Stored with the fitted version")] = None,
+) -> None:
+    """Fit inverse-MAE blend weights from the scoreboards → new fitted version + JSON artefact."""
+    import json
+    from datetime import UTC, datetime
+
+    from lazy_sleeper.providers import WeightRepository, fit_from_csvs, to_json
+
+    fitted = fit_from_csvs(season_csv, weekly_csv)
+    if not fitted:
+        raise typer.BadParameter(f"nothing to fit from {season_csv} / {weekly_csv}")
+    fitted_at = datetime.now(UTC)
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        version = WeightRepository(s).store_fitted(fitted, fitted_at=fitted_at, note=note)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(to_json(fitted, version, fitted_at), indent=2) + "\n")
+    typer.echo(f"{'horizon':<8}{'pos':<5}{'provider':<9}{'weight':>8}{'mae':>9}{'n':>7}")
+    for f in fitted:
+        typer.echo(
+            f"{f.horizon:<8}{f.position:<5}{f.provider:<9}{f.weight:>8.3f}{f.mae:>9.2f}{f.n:>7}"
+        )
+    typer.echo(f"\nstored derived.ensemble_weights version {version}; wrote {out}")
+
+
+# --- weights ---------------------------------------------------------------
+weights_app = typer.Typer(no_args_is_help=True)
+app.add_typer(
+    weights_app, name="weights", help="Ensemble blend weights: fitted vs manual overrides"
+)
+
+
+@weights_app.command("show")
+def weights_show(horizon: str = typer.Option("season", help="season | weekly")) -> None:
+    """Weights in force per position, plus the fitted/override rows behind them."""
+    from lazy_sleeper.providers import WeightRepository
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        repo = WeightRepository(s)
+        cfg = repo.config()
+        latest = repo.latest_version()
+        typer.echo(
+            f"use_overrides={cfg.use_overrides}  weights_version="
+            f"{cfg.weights_version if cfg.weights_version is not None else f'latest ({latest})'}"
+        )
+        fitted = repo.fitted(cfg.weights_version)
+        overrides = repo.overrides()
+        resolved = repo.resolve_all(horizon)
+        typer.echo(f"\n{horizon}: {'pos':<5}{'in force':<40}{'source':<10}{'fitted':<28}override")
+        for pos in sorted(
+            set(resolved)
+            | {p for h, p in fitted if h == horizon}
+            | {p for h, p in overrides if h == horizon}
+        ):
+            r = resolved.get(pos)
+            fmt = lambda d: " ".join(f"{k}={v:.3f}" for k, v in sorted(d.items())) or "-"  # noqa: E731
+            typer.echo(
+                f"{'':<{len(horizon) + 2}}{pos:<5}{fmt(r.weights) if r else '-':<40}"
+                f"{r.source if r else '-':<10}{fmt(fitted.get((horizon, pos), {})):<28}"
+                f"{fmt(overrides.get((horizon, pos), {}))}"
+            )
+
+
+@weights_app.command("set")
+def weights_set(
+    position: Annotated[str, typer.Argument(help="QB | RB | WR | TE | K | DEF")],
+    weights: Annotated[
+        list[str], typer.Argument(help="provider=weight …, e.g. sleeper=0.7 espn=0.3")
+    ],
+    horizon: str = typer.Option("season", help="season | weekly"),
+    note: str | None = typer.Option(None),
+    enable: bool = typer.Option(False, help="Also switch use_overrides on"),
+) -> None:
+    """Set the manual (λ) override for one position; normalized on read."""
+    from lazy_sleeper.providers import WeightRepository
+
+    parsed = {}
+    for spec in weights:
+        name, _, val = spec.partition("=")
+        parsed[name] = float(val)
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        repo = WeightRepository(s)
+        repo.set_override(horizon, position.upper(), parsed, note)
+        if enable:
+            repo.set_config(use_overrides=True)
+        cfg = repo.config()
+    typer.echo(
+        f"override {horizon}/{position.upper()} = {parsed} (use_overrides={cfg.use_overrides})"
+    )
+
+
+@weights_app.command("clear")
+def weights_clear(
+    position: str | None = typer.Argument(None, help="Omit to clear every position"),
+    horizon: str = typer.Option("season", help="season | weekly"),
+) -> None:
+    """Remove manual overrides (does not touch fitted weights or the use_overrides flag)."""
+    from lazy_sleeper.providers import WeightRepository
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        n = WeightRepository(s).clear_override(horizon, position.upper() if position else None)
+    typer.echo(f"cleared {n} override rows")
+
+
+@weights_app.command("config")
+def weights_config(
+    use_overrides: bool | None = typer.Option(None, "--use-overrides/--use-fitted"),
+    version: str | None = typer.Option(None, help="Pin a fitted version, or 'latest'"),
+) -> None:
+    """Flip between manual overrides and fitted weights; optionally pin a fitted version."""
+    from lazy_sleeper.providers import WeightRepository
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        repo = WeightRepository(s)
+        pin: int | None | str = "keep"
+        if version is not None:
+            pin = None if version == "latest" else int(version)
+        cfg = repo.set_config(use_overrides=use_overrides, weights_version=pin)
+        latest = repo.latest_version()
+        typer.echo(
+            f"use_overrides={cfg.use_overrides}  weights_version="
+            f"{cfg.weights_version if cfg.weights_version is not None else f'latest ({latest})'}"
+        )

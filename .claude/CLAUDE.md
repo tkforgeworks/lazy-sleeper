@@ -13,11 +13,10 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-19 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24 (PRs #1–#12). 144 tests, `ci` required on `main`.
-- **Next up, in order:** M2 = **LS-25** (inverse-error blend weights as versioned JSON + `ProjectionProvider`/
-  `SleeperProvider`/`EspnProvider`/`EnsembleProvider`; fit from `data/benchmarks/season_scoreboard.csv`
-  (draft) and `weekly_scoreboard.csv` (in-season); scale Sleeper DEF season totals or use ESPN). Then slot
-  **LS-17** daily scheduler (+ LS-11/12 Supabase bucket & `lazy sync`) before the board. M3 = LS-26→30
+- **Done:** LS-10, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25 (PRs #1–#13). 150 tests, `ci` required on
+  `main`. **M2 complete (2026-08-19).**
+- **Next up, in order:** **LS-17** daily scheduler (+ LS-11/12 Supabase bucket & `lazy sync`) before the
+  board, per the 08-17 plan; then M3 = LS-26→30
   (baselines, flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
   M4 = LS-16 → LS-31–38.
 - **Open loose ends (not blocking M2/M3, blocking draft-night reliability):** LS-11/12 (archive is
@@ -36,6 +35,14 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   ESPN `week 0` = season mirror, ignored); naive = trailing per-game mean (wk 1 = prior season). Roll-up
   pools MAE over player-weeks, `spearman` = mean per-week ρ. Sleeper ≈ ESPN everywhere (MAE 5–6, RB ρ
   0.62–0.66, WR 0.45–0.52, QB 0.24–0.31, K ≈ 0.1); both beat naive by 0.3–0.5 MAE; weekly bias ≈ 0.
+- **Providers + ensemble (LS-25, `providers/`):** `ProjectionProvider` protocol; `SleeperProvider`/
+  `EspnProvider` = latest stored vintage scored under league rules; `EnsembleProvider(members, weights)`
+  renormalizes per player over the members that have him (rookie fallback), keeps `components` per member.
+  Weights live in **`derived.ensemble_weights`** (fitted, append-only `version`, `w ∝ 1/MAE` pooled over
+  seasons — ≈50/50 everywhere; `lazy benchmark fit-weights` also writes `data/benchmarks/ensemble_weights.json`),
+  **`derived.weight_overrides`** (manual λ), **`derived.ensemble_config`** (`use_overrides`, `weights_version`
+  pin). Resolution in `WeightRepository.resolve_all`. CLI `lazy weights show|set|clear|config`; API
+  `GET/PUT/DELETE /ensemble/{weights,overrides,config}`. Wire providers via `_Ctx.provider(session, name)`.
 - Jira: move the story to In Progress when the branch opens, Done when the PR merges. LS-51 (freshness
   flags historical seasons STALE) is parked for 0.2.0.
 
