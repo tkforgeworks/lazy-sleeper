@@ -70,6 +70,7 @@ lazy score preview --position RB --top 20                # score latest 2026 pro
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
 lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
 lazy benchmark season / weekly                           # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/
+lazy benchmark fit-weights && lazy weights show          # inverse-MAE blend weights → derived.ensemble_weights
 lazy check freshness && lazy check joins                 # data-quality audit (see below)
 lazy check player "ja'marr chase" -t CIN                 # one-player dossier: ids, projections vs ours, actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
@@ -160,6 +161,43 @@ providers add real week-to-week signal on top of "he'll do what he's been doing"
 Weekly bias is within ±1 pt for both, so the season-total DEF offsets (Sleeper −12 / ESPN +17) are a
 season-projection artefact — the weekly DEF products are fine to blend.
 
+### Ensemble weights (LS-25)
+
+`lazy benchmark fit-weights` turns the two scoreboards into per-horizon, per-position blend weights:
+`w_p ∝ 1 / MAE_p` with MAE pooled across seasons (n-weighted), normalized over Sleeper + ESPN (naive is an
+opponent, not a member). Each run appends a new **version** to `derived.ensemble_weights` and rewrites the
+committed artefact [`data/benchmarks/ensemble_weights.json`](data/benchmarks/ensemble_weights.json). With
+the 2024–25 numbers everything lands ≈ 50/50 (Sleeper 52–53 % on season, 50 % weekly) — the point is that
+the weights are *measured*, and that ForgeModel slots in as a third member later.
+
+What the ensemble actually uses is resolved from three `derived.*` tables (`providers/weights.py`):
+
+| Table | Role |
+|---|---|
+| `ensemble_weights` | fitted weights, append-only by `version` (with the `mae`/`n` behind each) |
+| `weight_overrides` | manual per-(horizon, position, provider) weights — the λ override; normalized on read |
+| `ensemble_config` | one row: `use_overrides` (the app flag) and `weights_version` (pin a fit; NULL = latest) |
+
+Resolution: `use_overrides` on **and** override rows exist for the position → those; else fitted at the pinned
+/ latest version; else equal split. Per player, weights are renormalized over the members that projected
+him — a rookie only one feed carries gets that feed at 100 % (the spec's consensus fallback).
+
+```bash
+lazy weights show [--horizon weekly]                     # in force / fitted / override per position
+lazy weights set QB sleeper=0.7 espn=0.3 --enable        # override QB and flip use_overrides on
+lazy weights config --use-fitted | --use-overrides       # the switch; --version 2|latest pins a fit
+lazy weights clear [QB]                                  # drop overrides (flag untouched)
+lazy score preview --source ensemble --position RB       # blended points + each member's column
+```
+
+Same over HTTP for the Flutter app: `GET /ensemble/weights?horizon=season`, `PUT /ensemble/overrides`
+(`{horizon, position, weights, note}`), `DELETE /ensemble/overrides?horizon=&position=`,
+`PUT /ensemble/config` (`{use_overrides, weights_version | latest}`).
+
+Providers (`providers/`): `ProjectionProvider` protocol → `SleeperProvider` / `EspnProvider` (latest stored
+vintage in `core.projections`, scored under league rules) and `EnsembleProvider(members, weights)`, whose
+`PlayerProjection.components` keeps each member's points for the disagreement flags in LS-29.
+
 ## Layout
 
 ```
@@ -175,7 +213,9 @@ lazy_sleeper/
                 league (rules + distributions from DB), parity (engine vs nflverse PPR)
   metrics/      mae / bias / rmse / spearman (pure Python)
   benchmark/    season + weekly scoreboards: ADP pool → provider projections vs scored actuals; report (CSV)
-  providers/ model/   (M2+)
+  providers/    ProjectionProvider; SleeperProvider/EspnProvider (stored vintages); EnsembleProvider; weights
+                (inverse-MAE fit + derived.* repository: fitted versions, overrides, config)
+  model/        (M5 ForgeModel)
 tests/          unit tests + trimmed real-payload fixtures
 ```
 

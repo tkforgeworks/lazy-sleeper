@@ -1,17 +1,55 @@
-"""FastAPI application. M0: health + snapshot inventory. Board/draft endpoints arrive in M3/M4."""
+"""FastAPI application. M0: health + snapshot inventory; LS-25: ensemble weights switchboard.
+Board/draft endpoints arrive in M3/M4."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lazy_sleeper.config import Settings, get_settings
 from lazy_sleeper.db.models import Snapshot
 from lazy_sleeper.db.session import make_engine, make_session_factory
+from lazy_sleeper.providers import SEASON, WEEKLY, WeightRepository
+
+
+class OverrideBody(BaseModel):
+    horizon: str = Field(pattern=f"^({SEASON}|{WEEKLY})$")
+    position: str = Field(min_length=1, max_length=8)
+    weights: dict[str, float]  # provider → weight (normalized on read)
+    note: str | None = None
+
+
+class ConfigBody(BaseModel):
+    use_overrides: bool | None = None
+    weights_version: int | None = None  # pin a fitted version
+    latest: bool = False  # True → clear the pin (use latest fitted)
+
+
+def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:
+    cfg = repo.config()
+    latest = repo.latest_version()
+    fitted = repo.fitted(cfg.weights_version)
+    overrides = repo.overrides()
+    return {
+        "horizon": horizon,
+        "config": {
+            "use_overrides": cfg.use_overrides,
+            "weights_version": cfg.weights_version,
+            "latest_version": latest,
+            "updated_at": cfg.updated_at,
+        },
+        "in_force": {
+            pos: {"weights": r.weights, "source": r.source, "version": r.version}
+            for pos, r in repo.resolve_all(horizon).items()
+        },
+        "fitted": {pos: w for (h, pos), w in fitted.items() if h == horizon},
+        "overrides": {pos: w for (h, pos), w in overrides.items() if h == horizon},
+    }
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -54,6 +92,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
             for r in rows
         ]
+
+    @app.get("/ensemble/weights")
+    def ensemble_weights(
+        horizon: str = SEASON,
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Weights in force per position, plus the fitted and override rows and the config flags."""
+        if horizon not in (SEASON, WEEKLY):
+            raise HTTPException(422, f"horizon must be {SEASON!r} or {WEEKLY!r}")
+        return _weights_payload(WeightRepository(session), horizon)
+
+    @app.put("/ensemble/overrides")
+    def put_override(
+        body: OverrideBody,
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Set the manual (λ) override for one position. Does not flip use_overrides by itself."""
+        repo = WeightRepository(session)
+        try:
+            repo.set_override(body.horizon, body.position.upper(), body.weights, body.note)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        session.commit()
+        return _weights_payload(repo, body.horizon)
+
+    @app.delete("/ensemble/overrides")
+    def delete_override(
+        horizon: str = SEASON,
+        position: str | None = None,
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        repo = WeightRepository(session)
+        removed = repo.clear_override(horizon, position.upper() if position else None)
+        session.commit()
+        return {"removed": removed, **_weights_payload(repo, horizon)}
+
+    @app.put("/ensemble/config")
+    def put_config(
+        body: ConfigBody,
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Flip use_overrides and/or pin a fitted version (`latest: true` clears the pin)."""
+        repo = WeightRepository(session)
+        pin: int | None | str = "keep"
+        if body.latest:
+            pin = None
+        elif body.weights_version is not None:
+            if body.weights_version > (repo.latest_version() or 0):
+                raise HTTPException(422, f"no fitted version {body.weights_version}")
+            pin = body.weights_version
+        repo.set_config(use_overrides=body.use_overrides, weights_version=pin)
+        session.commit()
+        return _weights_payload(repo, SEASON)
 
     return app
 

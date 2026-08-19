@@ -253,3 +253,67 @@ class ExpectedPoints(Base):
     total_fantasy_points: Mapped[float | None] = mapped_column(Float)
     total_fantasy_points_exp: Mapped[float | None] = mapped_column(Float)
     ep: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+# --- derived ------------------------------------------------------------------------------
+
+
+class EnsembleWeight(Base):
+    """Fitted inverse-error blend weights (LS-25) — append-only, one `version` per fit run.
+
+    `horizon` is "season" or "weekly"; `weight` is normalized over the providers of that
+    (version, horizon, position). `mae` / `n` are the pooled benchmark numbers behind it.
+    """
+
+    __tablename__ = "ensemble_weights"
+    __table_args__ = (
+        UniqueConstraint(
+            "version", "horizon", "position", "provider", name="uq_ensemble_weight_identity"
+        ),
+        {"schema": "derived"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    fitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    horizon: Mapped[str] = mapped_column(String(8), nullable=False)
+    position: Mapped[str] = mapped_column(String(8), nullable=False)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
+    mae: Mapped[float | None] = mapped_column(Float)
+    n: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+class WeightOverride(Base):
+    """Manual per-position blend weights (the λ override) — upserted by hand / from the app.
+
+    Only consulted when `EnsembleConfig.use_overrides` is on; a position with no override rows
+    falls back to the fitted weights. Weights are normalized at read time.
+    """
+
+    __tablename__ = "weight_overrides"
+    __table_args__ = (
+        UniqueConstraint("horizon", "position", "provider", name="uq_weight_override_identity"),
+        {"schema": "derived"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    horizon: Mapped[str] = mapped_column(String(8), nullable=False)
+    position: Mapped[str] = mapped_column(String(8), nullable=False)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EnsembleConfig(Base):
+    """Single-row switchboard: use overrides or fitted weights; optionally pin a fitted version."""
+
+    __tablename__ = "ensemble_config"
+    __table_args__ = ({"schema": "derived"},)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # always 1
+    use_overrides: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    weights_version: Mapped[int | None] = mapped_column(Integer)  # NULL = latest fitted
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
