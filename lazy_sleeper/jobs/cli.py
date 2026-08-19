@@ -12,6 +12,7 @@ lazy load crosswalk
 lazy load stats                 # not-yet-loaded snapshots → projections/actuals/adp/snaps/xfp
 lazy load stats --source sleeper --season 2026   # only matching snapshots
 lazy snapshots reindex          # re-register local archive files after a DB reset
+lazy sync push|pull             # mirror local archive ↔ Supabase Storage (fresh machine: pull)
 lazy benchmark season|weekly    # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/*.csv
 lazy benchmark fit-weights      # inverse-MAE blend weights → derived.ensemble_weights + JSON
 lazy weights show|set|clear|config   # fitted vs manual-override blend weights (the λ switch)
@@ -904,3 +905,45 @@ def weights_config(
             f"use_overrides={cfg.use_overrides}  weights_version="
             f"{cfg.weights_version if cfg.weights_version is not None else f'latest ({latest})'}"
         )
+
+
+# --- sync ------------------------------------------------------------------
+sync_app = typer.Typer(no_args_is_help=True)
+app.add_typer(sync_app, name="sync", help="Reconcile the local archive with Supabase Storage")
+
+
+def _sync_report(action: str, rep) -> None:  # noqa: ANN001
+    typer.echo(
+        f"{action}: uploaded={rep.uploaded} already_remote={rep.already_remote} "
+        f"downloaded={rep.downloaded} skipped={rep.skipped} "
+        f"missing_local={len(rep.missing_local)} failed={len(rep.failed)}"
+    )
+    for p in rep.missing_local[:20]:
+        typer.echo(f"  missing locally: {p}")
+    for p, err in rep.failed[:20]:
+        typer.echo(f"  FAILED {p}: {err}")
+    if rep.failed:
+        raise typer.Exit(code=1)
+
+
+@sync_app.command("push")
+def sync_push(
+    verify: bool = typer.Option(False, help="Re-check rows that already claim a remote_path"),
+    dry_run: bool = typer.Option(False, help="Report only"),
+) -> None:
+    """Upload every registered snapshot the mirror lacks; sets raw.snapshots.remote_path."""
+    from lazy_sleeper.ingest.sync import Syncer
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        _sync_report("push", Syncer(s, ctx.store).push(verify=verify, dry_run=dry_run))
+
+
+@sync_app.command("pull")
+def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
+    """Download every registered snapshot missing from the local archive (fresh machine / CI)."""
+    from lazy_sleeper.ingest.sync import Syncer
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        _sync_report("pull", Syncer(s, ctx.store).pull(dry_run=dry_run))

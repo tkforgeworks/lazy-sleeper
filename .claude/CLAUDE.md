@@ -13,14 +13,16 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-19 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24, 25 (PRs #1–#13). 150 tests, `ci` required on
-  `main`. **M2 complete (2026-08-19).**
-- **Next up, in order:** **LS-17** daily scheduler (+ LS-11/12 Supabase bucket & `lazy sync`) before the
-  board, per the 08-17 plan; then M3 = LS-26→30
+- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25 (PRs #1–#14). 157 tests, `ci`
+  required on `main`. **M2 complete (2026-08-19).**
+- **Next up, in order:** M3 = LS-26→30
   (baselines, flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
   M4 = LS-16 → LS-31–38.
-- **Open loose ends (not blocking M2/M3, blocking draft-night reliability):** LS-11/12 (archive is
-  single-machine since the 08-16 backup), LS-17 (nothing runs `lazy pull daily` unattended), LS-16.
+- **Open loose ends:** LS-16 (draft picks/rosters → core). Ops (LS-11/12/17, 2026-08-19): archive fully
+  mirrored to Supabase Storage (`lazy sync push|pull`, `SnapshotStore.read` fetches on demand); the daily
+  pull is `.github/workflows/daily-pull.yml` (06:00 ET, checks out `main` — no puller box to update; needs
+  repo secrets `DATABASE_URL`/`SUPABASE_*`/`SLEEPER_*`) and requires the **DB cut-over to Supabase
+  Postgres** (README "Cut-over"); until that's done the workflow can't run.
 - **Benchmark (LS-23, `lazy benchmark season`, `benchmark/season.py`, `metrics/`):** pool = top-N by
   preseason Sleeper ADP per position (QB 24 / RB 60 / WR 72 / TE 24 / K 24 / DEF 24, ADP ≤ 300 — the
   ADP tail is unsigned kickers), providers `sleeper`/`espn` = latest stored season vintage, `naive` =
@@ -52,8 +54,8 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   `[dependency-groups] dev`; run tools as `uv run pytest` / `uv run ruff` / `uv run lazy`), hatchling,
   ruff (line 100), pytest. CLI entrypoint `lazy` (`lazy_sleeper.jobs.cli`) — was `ls`, renamed to avoid
   shadowing the shell command.
-- Postgres via SQLAlchemy 2 + Alembic. Local: `docker compose up -d` (port 5433). Hosted target: Supabase
-  free tier (Pro is an accepted fallback). Schemas `raw` / `core` / `derived`; plain Postgres only, no
+- Postgres via SQLAlchemy 2 + Alembic. **Shared DB = Supabase Postgres** (free tier; Pro accepted
+  fallback); `docker compose up -d` (port 5433) is a throwaway local DB for experiments/CI. Schemas `raw` / `core` / `derived`; plain Postgres only, no
   local-only extensions — migrations must run unchanged on Supabase.
 - FastAPI is the only API. Flutter consumes it; a minimal HTML page from FastAPI is the draft-night fallback.
   No PostgREST-direct reads from clients.
