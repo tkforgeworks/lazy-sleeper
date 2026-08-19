@@ -1,0 +1,60 @@
+name: daily-pull
+
+# The pre-draft "puller box" is this workflow, not a machine (LS-17): every run checks out `main`,
+# so there is nothing to keep updated. It pulls fresh Sleeper/ESPN/crosswalk snapshots (mirrored to
+# Supabase Storage), loads them into the shared Supabase Postgres, and prints the freshness audit.
+# A failed run shows up as a red workflow + GitHub's failure notification. Run it by hand from the
+# Actions tab (workflow_dispatch) to test or to catch up after a miss.
+#
+# Required repository secrets: DATABASE_URL (Supabase Postgres, SQLAlchemy URL), SUPABASE_URL,
+# SUPABASE_SECRET_KEY, SLEEPER_LEAGUE_ID, SLEEPER_DRAFT_ID, SLEEPER_USER_ID.
+
+on:
+  schedule:
+    - cron: "0 10 * * *" # 06:00 ET (EDT); GitHub cron is best-effort, drift of minutes is normal
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season to pull"
+        default: "2026"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    name: pull daily
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      SUPABASE_BUCKET: raw-snapshots
+      SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
+      SLEEPER_DRAFT_ID: ${{ secrets.SLEEPER_DRAFT_ID }}
+      SLEEPER_USER_ID: ${{ secrets.SLEEPER_USER_ID }}
+      SNAPSHOT_DIR: ./data/snapshots
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Preflight (secrets present, DB reachable, schema current)
+        run: |
+          test -n "$DATABASE_URL" || { echo "DATABASE_URL secret missing"; exit 1; }
+          test -n "$SUPABASE_URL" || { echo "SUPABASE_URL secret missing"; exit 1; }
+          uv run alembic current
+      - name: Pull daily (players, season projections/ADP, ESPN, crosswalk)
+        run: uv run lazy pull daily --season "${{ inputs.season || '2026' }}"
+      - name: Load into core.*
+        run: uv run lazy load players && uv run lazy load crosswalk && uv run lazy load stats
+      - name: Freshness audit
+        run: uv run lazy check freshness

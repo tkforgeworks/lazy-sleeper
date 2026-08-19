@@ -66,3 +66,42 @@ def test_key_path_without_season_week() -> None:
     key = SnapshotKey("nflverse", "crosswalk")
     ts = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
     assert key.relative_path(ts, ext="csv") == "nflverse/crosswalk/na/na/20260102T030405Z.csv.gz"
+
+
+class MemoryRemote:
+    """Fake mirror with the full RemoteStorage surface (upload / exists / download)."""
+
+    bucket = "bucket"
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def upload(self, path: str, data: bytes, content_type: str) -> str:
+        self.objects[path] = data
+        return f"bucket/{path}"
+
+    def exists(self, path: str) -> bool:
+        return path in self.objects
+
+    def download(self, path: str) -> bytes:
+        return self.objects[path]
+
+
+def test_read_falls_back_to_remote_and_caches_locally(tmp_path: Path) -> None:
+    remote = MemoryRemote()
+    store = SnapshotStore(tmp_path, remote)
+    rec = store.write(SnapshotKey("sleeper", "league"), b'{"name":"The League"}')
+    (tmp_path / rec.storage_path).unlink()  # simulate a fresh machine / CI runner
+
+    assert store.fetch(rec.storage_path) is True
+    assert (tmp_path / rec.storage_path).exists()
+    assert store.fetch(rec.storage_path) is False  # already local now
+    assert store.read(rec.storage_path) == b'{"name":"The League"}'
+
+
+def test_read_missing_everywhere_raises(tmp_path: Path) -> None:
+    store = SnapshotStore(tmp_path, MemoryRemote())
+    with pytest.raises(KeyError):  # MemoryRemote.download on an unknown path
+        store.read("sleeper/league/na/na/20260101T000000Z.json.gz")
+    with pytest.raises(FileNotFoundError):
+        SnapshotStore(tmp_path).read("sleeper/league/na/na/20260101T000000Z.json.gz")

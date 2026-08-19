@@ -23,9 +23,12 @@ Prereqs: **[uv](https://docs.astral.sh/uv/)** (installs Python 3.12 itself if ne
 ```bash
 gh repo clone tkforgeworks/lazy-sleeper && cd lazy-sleeper
 uv sync                                                # creates .venv from uv.lock (runtime + dev deps)
-cp .env.example .env                                   # then fill SUPABASE_URL / SUPABASE_SECRET_KEY
-docker compose up -d && uv run lazy db upgrade
+cp .env.example .env                                   # DATABASE_URL (Supabase), SUPABASE_URL / SECRET_KEY
+uv run lazy sync pull                                  # optional: fetch the raw archive from Storage
 ```
+
+(`docker compose up -d && uv run lazy db upgrade` gives you a throwaway local Postgres instead — same
+migrations; point `DATABASE_URL` at `localhost:5433`.)
 
 Every command below is `uv run <cmd>` — or activate the venv once (`source .venv/bin/activate` on
 macOS/Linux; `.\.venv\Scripts\Activate.ps1` in Windows PowerShell) and drop the prefix. On Windows,
@@ -33,19 +36,58 @@ macOS/Linux; `.\.venv\Scripts\Activate.ps1` in Windows PowerShell) and drop the 
 changes it. To add/upgrade a dependency use `uv add <pkg>` / `uv lock --upgrade-package <pkg>` and commit
 the lockfile.
 
-**Things that are NOT in git and must be moved by hand:**
+**Where the state lives (after LS-11/12/17):**
 
-1. **`data/snapshots/`** — the local raw archive (~30 MB gz). It contains the irreplaceable 2026-08-16
-   preseason vintage; providers revise their data, so it cannot be re-pulled. Copy the folder (or restore it
-   from Supabase Storage once `lazy sync` / LS-12 exists), then rebuild the DB from it:
-   ```bash
-   lazy snapshots reindex          # re-registers every archive file in raw.snapshots
-   lazy load players && lazy load crosswalk && lazy load stats
-   ```
-   Also keep `data_pulls/ff-projections-2026-08-16.zip` (16 MB, the original pull) somewhere off-machine.
-2. **`.env`** — never committed. Only `SUPABASE_URL` / `SUPABASE_SECRET_KEY` need real values today.
-3. **`docker compose` volume** — the dev DB is per-machine; rebuild it with the commands above rather than
-   copying the volume.
+- **Supabase Postgres** is the shared DB — every machine and the daily-pull workflow point `DATABASE_URL`
+  at it. The Docker Postgres in `docker-compose.yml` is for local experiments and CI only.
+- **Supabase Storage** bucket `raw-snapshots` mirrors the raw archive; the local `data/snapshots/` is a
+  cache. `SnapshotStore.read` downloads any file it doesn't have, and `lazy sync pull` fetches the whole
+  archive up front. `lazy sync push` uploads anything registered in `raw.snapshots` that the bucket lacks
+  (idempotent — the 2026-08-16 preseason vintage was pushed this way and is safe).
+- **`.env`** — never committed: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SLEEPER_*`.
+
+So a new machine is: clone → `uv sync` → `.env` → `lazy sync pull` (optional; things fetch on demand)
+→ done. Rebuilding an *empty* DB from the archive is `lazy db upgrade` → `lazy snapshots reindex` →
+`lazy load players && lazy load crosswalk && lazy load stats` → `lazy benchmark fit-weights`.
+
+### Supabase setup (LS-11)
+
+Project `lazy-sleeper` (free tier: 500 MB Postgres, 1 GB Storage; ~140 MB / ~60 MB used after two
+seasons of history — Pro is the accepted fallback). One-time:
+
+1. Storage → **New bucket** `raw-snapshots`, private. (`SUPABASE_BUCKET` defaults to that name.)
+2. Project Settings → API Keys → create an `sb_secret_…` key → `SUPABASE_SECRET_KEY`; the project URL
+   → `SUPABASE_URL`. The store mirrors every pull automatically once both are set.
+3. Project Settings → Database → connection string (**Session pooler**, port 5432, IPv4-friendly) →
+   `DATABASE_URL=postgresql+psycopg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`.
+
+**Cut-over from a local Docker DB** (done once, from the machine that has the data; ~5 min):
+
+```bash
+# 1. schema on Supabase
+DATABASE_URL="$SUPABASE_DB_URL" uv run lazy db upgrade
+# 2a. exact copy of the local DB (keeps snapshot ids, fitted weights, config) …
+docker compose exec -T db pg_dump -U lazysleeper --data-only --schema=raw --schema=core --schema=derived   lazysleeper | docker compose exec -T db psql "$SUPABASE_DB_URL_PSQL"      # postgresql://… form
+# 2b. … or rebuild from the archive instead (slower, no pg tools needed)
+DATABASE_URL="$SUPABASE_DB_URL" uv run lazy snapshots reindex && uv run lazy load players &&   uv run lazy load crosswalk && uv run lazy load stats && uv run lazy benchmark fit-weights
+# 3. mirror the archive, then point .env at Supabase for good
+uv run lazy sync push && uv run lazy check freshness
+```
+
+### Daily pull — the scheduler is a GitHub Actions workflow (LS-17)
+
+[`.github/workflows/daily-pull.yml`](.github/workflows/daily-pull.yml) runs `lazy pull daily` →
+`lazy load players/crosswalk/stats` → `lazy check freshness` at **06:00 ET** every day (and on demand
+from the Actions tab). Every run checks out `main`, so **there is no puller box to keep updated** — merge
+to `main` and tomorrow's pull runs it. Snapshots land in the bucket, rows in Supabase Postgres; the
+runner's local archive is thrown away. A failed run is a red workflow + GitHub's failure email; the
+`Freshness audit` step is what to read when something looks off.
+
+Repository secrets it needs (Settings → Secrets and variables → Actions): `DATABASE_URL`, `SUPABASE_URL`,
+`SUPABASE_SECRET_KEY`, `SLEEPER_LEAGUE_ID`, `SLEEPER_DRAFT_ID`, `SLEEPER_USER_ID`. Caveats: GitHub cron is
+best-effort (minutes of drift; the occasional skipped slot on busy hours — re-run by hand); scheduled
+workflows are disabled after 60 days without repo activity. Fallback if GitHub runner IPs ever get blocked
+by a provider: the same steps as a homelab k8s CronJob (image build in CI); the code path is identical.
 
 Everyday loop: `lazy pull daily` (fresh Sleeper/ESPN/crosswalk snapshots) → `lazy load stats` →
 `uv run pytest -q && uv run ruff check .` → branch `LS-N-…` → PR to `main` (self-merge OK once `ci` is

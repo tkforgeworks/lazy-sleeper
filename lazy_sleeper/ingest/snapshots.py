@@ -54,6 +54,10 @@ class SnapshotRecord:
 class RemoteStorage(Protocol):
     def upload(self, path: str, data: bytes, content_type: str) -> str: ...
 
+    def exists(self, path: str) -> bool: ...
+
+    def download(self, path: str) -> bytes: ...
+
 
 class SupabaseStorage:
     """Minimal Supabase Storage REST client (no SDK). sb_secret key; upsert disabled."""
@@ -66,14 +70,40 @@ class SupabaseStorage:
             headers={"Authorization": f"Bearer {secret_key}", "apikey": secret_key},
         )
 
+    def _object_url(self, path: str) -> str:
+        return f"{self._base}/storage/v1/object/{self._bucket}/{path}"
+
     def upload(self, path: str, data: bytes, content_type: str = "application/gzip") -> str:
         resp = self._client.post(
-            f"{self._base}/storage/v1/object/{self._bucket}/{path}",
+            self._object_url(path),
             content=data,
             headers={"Content-Type": content_type, "x-upsert": "false"},
         )
         resp.raise_for_status()
         return f"{self._bucket}/{path}"
+
+    def exists(self, path: str) -> bool:
+        resp = self._client.get(f"{self._base}/storage/v1/object/info/{self._bucket}/{path}")
+        if resp.status_code == 200:
+            return True
+        # Supabase answers a missing object with HTTP 400 + {"error": "not_found"} (not 404).
+        if resp.status_code in (400, 404) and "not_found" in resp.text:
+            return False
+        resp.raise_for_status()
+        return True
+
+    def download(self, path: str) -> bytes:
+        resp = self._client.get(self._object_url(path))
+        resp.raise_for_status()
+        return resp.content
+
+    @staticmethod
+    def remote_path(bucket: str, path: str) -> str:
+        return f"{bucket}/{path}"
+
+    @property
+    def bucket(self) -> str:
+        return self._bucket
 
 
 class SnapshotStore:
@@ -84,6 +114,33 @@ class SnapshotStore:
     @property
     def root(self) -> Path:
         return self._root
+
+    @property
+    def remote(self) -> RemoteStorage | None:
+        return self._remote
+
+    def has_local(self, storage_path: str) -> bool:
+        return (self._root / storage_path).exists()
+
+    def local_bytes(self, storage_path: str) -> bytes:
+        """The gzipped archive file as stored (no decompression)."""
+        return (self._root / storage_path).read_bytes()
+
+    def fetch(self, storage_path: str) -> bool:
+        """Ensure the archive file exists locally, downloading from the mirror if needed.
+
+        Returns True if it had to download. Raises if it is missing on both sides.
+        """
+        target = self._root / storage_path
+        if target.exists():
+            return False
+        if self._remote is None:
+            raise FileNotFoundError(f"{target} missing and no remote storage configured")
+        gz = self._remote.download(storage_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(gz)
+        log.info("fetched %s from remote storage", storage_path)
+        return True
 
     def write(
         self,
@@ -150,6 +207,8 @@ class SnapshotStore:
         )
 
     def read(self, storage_path: str) -> bytes:
+        """Decompressed payload; pulls the file down from the mirror if it isn't on disk."""
+        self.fetch(storage_path)
         return gzip.decompress((self._root / storage_path).read_bytes())
 
 
