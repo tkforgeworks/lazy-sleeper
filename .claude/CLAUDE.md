@@ -18,11 +18,17 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 - **Next up, in order:** M3 = LS-26→30
   (baselines, flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
   M4 = LS-16 → LS-31–38.
-- **Open loose ends:** LS-16 (draft picks/rosters → core). Ops (LS-11/12/17, 2026-08-19): archive fully
-  mirrored to Supabase Storage (`lazy sync push|pull`, `SnapshotStore.read` fetches on demand); the daily
-  pull is `.github/workflows/daily-pull.yml` (06:00 ET, checks out `main` — no puller box to update; needs
-  repo secrets `DATABASE_URL`/`SUPABASE_*`/`SLEEPER_*`) and requires the **DB cut-over to Supabase
-  Postgres** (README "Cut-over"); until that's done the workflow can't run.
+- **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
+  STALE) parked for 0.2.0.
+- **Ops state (2026-08-19, LS-11/12/17 done):** **the shared DB is Supabase Postgres** — cut over via
+  `pg_dump | psql` (row counts verified identical; `check joins` baseline reproduced), migrations 0001–0005
+  applied (0005 = RLS on `public.alembic_version` for the Supabase advisor). Local `.env` `DATABASE_URL` →
+  Supabase session pooler (`postgresql+psycopg://postgres.<ref>:…@aws-0-us-east-1.pooler.supabase.com:5432/
+  postgres`); the Docker DB is kept as `DATABASE_URL_LOCAL` for diffs only. Archive fully mirrored to
+  Storage bucket `raw-snapshots` (`lazy sync push|pull`; `SnapshotStore.read` fetches on demand). Daily pull
+  = `.github/workflows/daily-pull.yml`, 06:00 ET, checks out `main` (no puller box to update), repo secrets
+  set, **first run green 2026-08-19 05:23 UTC incl. ESPN**. New machine: clone → `uv sync` → same `.env`
+  → optional `lazy sync pull`. Fallback host if GitHub runners ever get blocked: homelab k8s CronJob.
 - **Benchmark (LS-23, `lazy benchmark season`, `benchmark/season.py`, `metrics/`):** pool = top-N by
   preseason Sleeper ADP per position (QB 24 / RB 60 / WR 72 / TE 24 / K 24 / DEF 24, ADP ≤ 300 — the
   ADP tail is unsigned kickers), providers `sleeper`/`espn` = latest stored season vintage, `naive` =
