@@ -69,7 +69,7 @@ lazy score rules                                         # the league's scoring_
 lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
 lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
-lazy benchmark season                                    # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/
+lazy benchmark season / weekly                           # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/
 lazy check freshness && lazy check joins                 # data-quality audit (see below)
 lazy check player "ja'marr chase" -t CIN                 # one-player dossier: ids, projections vs ours, actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
@@ -144,6 +144,22 @@ where nothing beats anything. Both over-project WR/QB in 2025 by 45–70 pts on 
 as 0). Sleeper DEF runs ~12 pts under actual (no points-allowed data), ESPN ~17 over. This is the input to
 LS-25's blend weights — expect QB/TE/K weights to shrink toward the market and DEF to lean ESPN.
 
+`lazy benchmark weekly` is the same comparison one week at a time (start/sit horizon): the week's pool is
+the season ADP pool ∩ players at least one provider expected to play (projected > 0 — drops byes/injured),
+providers are the latest stored **pre-game** vintage for (source, season, week) — verified genuine: ρ 0.3–0.5,
+not ~1 — and `naive` = the player's per-game mean over earlier weeks this season (week 1: prior season's
+per-game mean). The roll-up per (season, position, provider) pools MAE/bias/RMSE over all player-weeks and
+reports `spearman` as the **mean of per-week ρ** plus `spearman_min` (worst week) and `weeks`. Written to
+[`data/benchmarks/weekly_scoreboard.csv`](data/benchmarks/weekly_scoreboard.csv); `--weeks-out` dumps the
+per-week rows, `--players-out` the player-weeks.
+
+Reading the weekly scoreboard: Sleeper and ESPN are near-identical (weekly MAE ≈ 5–6 pts on ~11-pt RB/WR
+means, ≈ 6.2 on ~18-pt QBs); RB ρ ≈ 0.62–0.66, WR 0.45–0.52, TE 0.36–0.40, QB 0.24–0.31, DEF 0.31–0.34,
+K ≈ 0.1 (min weeks go negative everywhere except RB). Both beat naive by 0.3–0.5 MAE and 0.05–0.2 ρ — the
+providers add real week-to-week signal on top of "he'll do what he's been doing", but not much at K/DEF.
+Weekly bias is within ±1 pt for both, so the season-total DEF offsets (Sleeper −12 / ESPN +17) are a
+season-projection artefact — the weekly DEF products are fine to blend.
+
 ## Layout
 
 ```
@@ -158,7 +174,7 @@ lazy_sleeper/
                 kicking (FG distance-mix normalizer), defense (brackets/TD roll-ups + streaming rank),
                 league (rules + distributions from DB), parity (engine vs nflverse PPR)
   metrics/      mae / bias / rmse / spearman (pure Python)
-  benchmark/    season scoreboard: ADP pool → provider projections vs Σ weekly actuals (`lazy benchmark season`)
+  benchmark/    season + weekly scoreboards: ADP pool → provider projections vs scored actuals; report (CSV)
   providers/ model/   (M2+)
 tests/          unit tests + trimmed real-payload fixtures
 ```

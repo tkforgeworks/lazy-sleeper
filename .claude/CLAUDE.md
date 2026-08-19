@@ -13,11 +13,10 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-19 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 13, 14, 15, 18, 19, 20, 21, 22, 23 (PRs #1–#11). 140 tests, `ci` required on `main`.
-- **Next up, in order:** M2 = **LS-24** (weekly scoreboard — reuse `benchmark/season.py` shapes: pool +
-  provider points + actual points → `scoreboard()`; weekly Sleeper/ESPN projections exist for 2024–25,
-  18 wks) → LS-25 (inverse-error blend weights as versioned JSON + `ProjectionProvider`/`SleeperProvider`/
-  `EspnProvider`/`EnsembleProvider`; read `data/benchmarks/season_scoreboard.csv`). Then slot
+- **Done:** LS-10, 13, 14, 15, 18, 19, 20, 21, 22, 23, 24 (PRs #1–#12). 144 tests, `ci` required on `main`.
+- **Next up, in order:** M2 = **LS-25** (inverse-error blend weights as versioned JSON + `ProjectionProvider`/
+  `SleeperProvider`/`EspnProvider`/`EnsembleProvider`; fit from `data/benchmarks/season_scoreboard.csv`
+  (draft) and `weekly_scoreboard.csv` (in-season); scale Sleeper DEF season totals or use ESPN). Then slot
   **LS-17** daily scheduler (+ LS-11/12 Supabase bucket & `lazy sync`) before the board. M3 = LS-26→30
   (baselines, flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
   M4 = LS-16 → LS-31–38.
@@ -32,6 +31,11 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   except K; 2025 bias +45–70 on QB/WR (busts). Sleeper DEF −12 / ESPN DEF +17 bias. Stored 2024/25
   projections are genuine preseason vintages (`last_modified` = Jan-after is ADP churn). The plan doc's
   0.71/0.86 anchor does not reproduce under any pool. LS-25: shrink QB/TE/K toward market, DEF → ESPN.
+  **Weekly (LS-24, `lazy benchmark weekly`, `benchmark/weekly.py`):** week pool = ADP pool ∩ projected > 0
+  by any provider; latest pre-game vintage per (source, season, week) (verified: ρ 0.3–0.5, no leakage;
+  ESPN `week 0` = season mirror, ignored); naive = trailing per-game mean (wk 1 = prior season). Roll-up
+  pools MAE over player-weeks, `spearman` = mean per-week ρ. Sleeper ≈ ESPN everywhere (MAE 5–6, RB ρ
+  0.62–0.66, WR 0.45–0.52, QB 0.24–0.31, K ≈ 0.1); both beat naive by 0.3–0.5 MAE; weekly bias ≈ 0.
 - Jira: move the story to In Progress when the branch opens, Done when the PR merges. LS-51 (freshness
   flags historical seasons STALE) is parked for 0.2.0.
 
