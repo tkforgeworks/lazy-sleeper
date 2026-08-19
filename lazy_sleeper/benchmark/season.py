@@ -83,6 +83,7 @@ class ScoreRow:
     rmse: float
     spearman: float
     mean_actual: float  # mean actual points over the n scored players (scale for MAE)
+    week: int | None = None  # None = season horizon
 
 
 @dataclass(frozen=True)
@@ -95,14 +96,18 @@ class PlayerRow:
     adp: float
     actual: float
     projected: dict[str, float | None] = field(default_factory=dict)  # provider → pts (None = n/a)
+    week: int | None = None
 
 
 @dataclass(frozen=True)
 class SeasonInputs:
+    """One horizon's worth of inputs — a season, or (with ``week`` set) a single week."""
+
     season: int
     pool: Sequence[PoolPlayer]
     providers: Mapping[str, Points]  # provider name → sleeper_id → projected pts
-    actuals: Points  # sleeper_id → actual season pts (missing = 0 for pool players)
+    actuals: Points  # sleeper_id → actual pts for the horizon (missing = 0 for pool players)
+    week: int | None = None
 
 
 # --- pure ---------------------------------------------------------------------------------
@@ -148,6 +153,7 @@ def scoreboard(inputs: SeasonInputs) -> tuple[list[ScoreRow], list[PlayerRow]]:
                     p.adp,
                     inputs.actuals.get(p.sleeper_id, 0.0),
                     {name: pts.get(p.sleeper_id) for name, pts in inputs.providers.items()},
+                    week=inputs.week,
                 )
             )
         for provider, projected in inputs.providers.items():
@@ -167,6 +173,7 @@ def scoreboard(inputs: SeasonInputs) -> tuple[list[ScoreRow], list[PlayerRow]]:
                     rmse=rmse(pred, act),
                     spearman=spearman(pred, act),
                     mean_actual=sum(act) / len(act) if act else math.nan,
+                    week=inputs.week,
                 )
             )
     return rows, detail
