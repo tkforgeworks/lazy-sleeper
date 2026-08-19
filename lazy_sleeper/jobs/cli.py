@@ -12,6 +12,7 @@ lazy load crosswalk
 lazy load stats                 # not-yet-loaded snapshots → projections/actuals/adp/snaps/xfp
 lazy load stats --source sleeper --season 2026   # only matching snapshots
 lazy snapshots reindex          # re-register local archive files after a DB reset
+lazy benchmark season           # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/*.csv
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -599,3 +601,116 @@ def check_player(
                 line = f"    {a['source']:<9}{a['season']:<8}{a['games']:<7}"
                 line += f"{a['source_player_id']:<12}"
                 typer.echo(line + f"{a['our_points']:>8.1f}{a['provider_points']:>10.1f}")
+
+
+# --- benchmark -------------------------------------------------------------
+SCOREBOARD_CSV = Path("data/benchmarks/season_scoreboard.csv")
+bench_app = typer.Typer(no_args_is_help=True)
+app.add_typer(bench_app, name="benchmark", help="Score providers against actuals")
+
+
+@bench_app.command("season")
+def benchmark_season(
+    seasons: Annotated[
+        list[int] | None, typer.Option("--season", "-s", help="Repeatable; default 2024 2025")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option(help="Scoreboard CSV path; --no-csv to skip")
+    ] = SCOREBOARD_CSV,
+    csv_out: Annotated[bool, typer.Option("--csv/--no-csv")] = True,
+    players_out: Annotated[Path | None, typer.Option(help="Per-player detail CSV")] = None,
+    pool: Annotated[
+        list[str] | None,
+        typer.Option("--pool", help="Override a pool size, e.g. --pool RB=48 (repeatable)"),
+    ] = None,
+    max_adp: Annotated[float, typer.Option(help="Ignore ADP beyond this pick")] = 300.0,
+) -> None:
+    """Season scoreboard: Sleeper / ESPN / naive vs scored actuals, top-N by ADP per position.
+
+    Default pool: QB 24, RB 60, WR 72, TE 24, K 24, DEF 24 (top-N by preseason Sleeper ADP).
+    """
+    seasons = seasons or [2024, 2025]
+    import csv
+    import math
+
+    from lazy_sleeper.benchmark import season as bench
+    from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+    sizes = dict(bench.DEFAULT_POOL_SIZES)
+    for spec in pool or ():
+        pos, _, n = spec.partition("=")
+        sizes[pos.upper()] = int(n)
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        scorer = default_scorer(load_league_rules(s, ctx.store))
+        rows, detail = bench.run(s, scorer, seasons, sizes=sizes, max_adp=max_adp)
+
+    def fmt(v: float, w: int, d: int = 2) -> str:
+        return f"{'-':>{w}}" if math.isnan(v) else f"{v:>{w}.{d}f}"
+
+    typer.echo(
+        f"{'season':<7}{'pos':<5}{'provider':<9}{'pool':>5}{'n':>4}"
+        f"{'mae':>8}{'bias':>8}{'rmse':>8}{'rho':>7}{'mean_act':>10}"
+    )
+    for r in rows:
+        typer.echo(
+            f"{r.season:<7}{r.position:<5}{r.provider:<9}{r.n_pool:>5}{r.n:>4}"
+            f"{fmt(r.mae, 8)}{fmt(r.bias, 8)}{fmt(r.rmse, 8)}{fmt(r.spearman, 7, 3)}"
+            f"{fmt(r.mean_actual, 10, 1)}"
+        )
+
+    if csv_out and out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(
+                [
+                    "season",
+                    "position",
+                    "provider",
+                    "n_pool",
+                    "n",
+                    "mae",
+                    "bias",
+                    "rmse",
+                    "spearman",
+                    "mean_actual",
+                ]
+            )
+            for r in rows:
+                w.writerow(
+                    [
+                        r.season,
+                        r.position,
+                        r.provider,
+                        r.n_pool,
+                        r.n,
+                        *(
+                            f"{v:.4f}" if not math.isnan(v) else ""
+                            for v in (r.mae, r.bias, r.rmse, r.spearman, r.mean_actual)
+                        ),
+                    ]
+                )
+        typer.echo(f"\nwrote {out}")
+    if players_out:
+        providers = sorted({k for d in detail for k in d.projected})
+        players_out.parent.mkdir(parents=True, exist_ok=True)
+        with players_out.open("w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["season", "position", "sleeper_id", "adp", "actual", *providers])
+            for d in detail:
+                w.writerow(
+                    [
+                        d.season,
+                        d.position,
+                        d.sleeper_id,
+                        d.adp,
+                        f"{d.actual:.2f}",
+                        *(
+                            "" if d.projected.get(p) is None else f"{d.projected[p]:.2f}"
+                            for p in providers
+                        ),
+                    ]
+                )
+        typer.echo(f"wrote {players_out}")

@@ -27,8 +27,9 @@ cp .env.example .env                                   # then fill SUPABASE_URL 
 docker compose up -d && uv run lazy db upgrade
 ```
 
-Every command below is `uv run <cmd>` — or activate the venv once (`source .venv/bin/activate`;
-`.venv\Scripts\activate` on Windows) and drop the prefix. `uv.lock` is committed; `uv sync` never
+Every command below is `uv run <cmd>` — or activate the venv once (`source .venv/bin/activate` on
+macOS/Linux; `.\.venv\Scripts\Activate.ps1` in Windows PowerShell) and drop the prefix. On Windows,
+`uv run lazy …` from the repo root works with no activation at all. `uv.lock` is committed; `uv sync` never
 changes it. To add/upgrade a dependency use `uv add <pkg>` / `uv lock --upgrade-package <pkg>` and commit
 the lockfile.
 
@@ -56,7 +57,7 @@ Claude Code notes: repo instructions live in `.claude/CLAUDE.md` (travels with t
 ## Quick start
 
 ```bash
-uv sync && source .venv/bin/activate                   # .venv\Scripts\activate on Windows
+uv sync && source .venv/bin/activate                   # PowerShell: .\.venv\Scripts\Activate.ps1
 cp .env.example .env                                   # local Docker Postgres by default
 docker compose up -d                                   # Postgres 16 on localhost:5433
 lazy db upgrade                                          # alembic upgrade head
@@ -68,6 +69,7 @@ lazy score rules                                         # the league's scoring_
 lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
 lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
+lazy benchmark season                                    # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/
 lazy check freshness && lazy check joins                 # data-quality audit (see below)
 lazy check player "ja'marr chase" -t CIN                 # one-player dossier: ids, projections vs ours, actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
@@ -121,6 +123,27 @@ Known, accepted misses (as of 2026-08-17): top-300 miss #104 Thomas Odukoya (fre
 Devon Johnson, Ryan Smith TE↔CB) — the crosswalk maps the wrong namesake, none fantasy-relevant. ESPN's
 "Matthew Hibner" ≠ Sleeper's "Matt Hibner" (nickname; below 20 pts, ignored).
 
+## Benchmarks — which provider to trust (E4)
+
+`lazy benchmark season` scores each provider's stored **preseason** season projection under the league's
+own rules and compares it to what the same players actually scored (Σ weekly actuals under the same rules:
+nflverse for QB/RB/WR/TE/K, ESPN weekly for DEF). The comparison pool is *the market's*, not a provider's:
+top-N by preseason Sleeper ADP per position (QB 24 / RB 60 / WR 72 / TE 24 / K 24 / DEF 24, ADP ≤ 300;
+`--pool RB=48`, `--max-adp`). Providers: `sleeper`, `espn` (latest stored vintage) and `naive` = the
+player's previous-season actual total. Pool players with no actual rows count as 0 (they were drafted and
+produced nothing); pool players a provider didn't project are simply missing from its `n`.
+
+Per (season, position, provider): `n_pool`, `n`, `mae`, `bias` (mean pred − actual; + = provider too
+high), `rmse`, `spearman`, `mean_actual` (scale for MAE). Output is printed and written to
+[`data/benchmarks/season_scoreboard.csv`](data/benchmarks/season_scoreboard.csv) (committed — regenerate
+after re-pulling actuals); `--players-out <csv>` dumps the per-player detail behind it.
+
+Reading the 2024–25 scoreboard: Sleeper and ESPN are close on RB/WR (ρ 0.55–0.74, MAE ≈ 55–70 on a
+~150-pt mean); both are weak on QB and TE (2025 QB ρ ≈ 0.2 / −0.1), and both beat naive except at K,
+where nothing beats anything. Both over-project WR/QB in 2025 by 45–70 pts on average (injury busts count
+as 0). Sleeper DEF runs ~12 pts under actual (no points-allowed data), ESPN ~17 over. This is the input to
+LS-25's blend weights — expect QB/TE/K weights to shrink toward the market and DEF to lean ESPN.
+
 ## Layout
 
 ```
@@ -134,7 +157,9 @@ lazy_sleeper/
   scoring/      rules (league scoring_settings map), engine (score/breakdown, per-position normalizer hook),
                 kicking (FG distance-mix normalizer), defense (brackets/TD roll-ups + streaming rank),
                 league (rules + distributions from DB), parity (engine vs nflverse PPR)
-  metrics/ providers/ model/ benchmark/   (M1+)
+  metrics/      mae / bias / rmse / spearman (pure Python)
+  benchmark/    season scoreboard: ADP pool → provider projections vs Σ weekly actuals (`lazy benchmark season`)
+  providers/ model/   (M2+)
 tests/          unit tests + trimmed real-payload fixtures
 ```
 
