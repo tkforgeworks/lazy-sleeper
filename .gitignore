@@ -33,5 +33,6 @@ build/
 .coverage
 htmlcov/
 
-# Local snapshot archive (raw payloads; mirrored to Supabase Storage)
-data/
+# Local snapshot archive (raw payloads; mirrored to Supabase Storage) — but keep committed benchmarks
+data/*
+!data/benchmarks/
