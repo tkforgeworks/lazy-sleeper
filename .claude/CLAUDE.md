@@ -13,13 +13,21 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-19 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25 (PRs #1–#14). 157 tests, `ci`
-  required on `main`. **M2 complete (2026-08-19).**
-- **Next up, in order:** M3 = LS-26→30
-  (baselines, flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
+- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26 (PRs #1–#14 + LS-26).
+  166 tests, `ci` required on `main`. **M2 complete (2026-08-19).**
+- **Next up, in order:** M3 = LS-27→30
+  (flex-aware VORP, tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`).
   M4 = LS-16 → LS-31–38.
 - **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
-  STALE) parked for 0.2.0.
+  STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
+  latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
+  as of 2026-08-19 (each pull appends a 17k-row ESPN kona vintage); land before the free tier bites.
+- **Baselines (LS-26, `board/baselines.py`, `lazy board baselines`):** replacement level = points of
+  the last starter; cutoffs derived from `roster_positions` × `total_rosters` (now on `ScoringRules`)
+  + flex seats filled greedily by value (most-restrictive seat first). 2025 actuals reproduce the plan
+  anchors within one flex seat (QB12 282.9, RB30/WR40/TE14 ≈ 147–150). Historical = per-season
+  2023–25 baselines averaged (`HistoricalBaselines.average` — the VORP input); DEF averages 2024–25
+  only (no 2023 ESPN weekly DEF). Live = `live_baselines(provider, shape, season)` on the ensemble.
 - **Ops state (2026-08-19, LS-11/12/17 done):** **the shared DB is Supabase Postgres** — cut over via
   `pg_dump | psql` (row counts verified identical; `check joins` baseline reproduced), migrations 0001–0005
   applied (0005 = RLS on `public.alembic_version` for the Supabase advisor). Local `.env` `DATABASE_URL` →

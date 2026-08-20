@@ -26,6 +26,7 @@ class ScoringRules:
 
     weights: Mapping[str, float]
     roster_positions: tuple[str, ...] = ()
+    total_rosters: int | None = None
     league_id: str | None = None
     league_name: str | None = None
 
@@ -45,9 +46,11 @@ class ScoringRules:
         settings = payload.get("scoring_settings")
         if not isinstance(settings, Mapping) or not settings:
             raise ValueError("league payload has no scoring_settings")
+        total = payload.get("total_rosters")
         return cls(
             weights=settings,
             roster_positions=tuple(payload.get("roster_positions") or ()),
+            total_rosters=int(total) if total else None,
             league_id=payload.get("league_id"),
             league_name=payload.get("name"),
         )
