@@ -12,7 +12,9 @@ FastAPI surface. The Flutter client lives in a separate repo (`lazy-sleeper-app`
 **M0–M2 done (2026-08-19):** ingestion + immutable snapshot archive, league scoring engine (QB–DEF, parity
 vs nflverse), season + weekly provider benchmarks, provider abstraction + fitted ensemble weights, and the
 ops floor — shared Supabase Postgres (cut over 2026-08-19), archive mirrored to Supabase Storage, daily
-pull running from GitHub Actions. Next: M3 draft board (LS-26→30). See
+pull running from GitHub Actions. **M3 board core done (2026-08-19):** replacement baselines, flex-aware
+VORP, tiers + cliff flags (`lazy board …`, see "Draft board" below). Remaining for M3: LS-29 (ADP delta +
+disagreement flags) and LS-30 (`/board` + daily regen). See
 [`docs/execution-plan-analysis_20260816.md`](docs/execution-plan-analysis_20260816.md) for the milestone plan
 and [`docs/draft-companion-execution-plan_20260816.md`](docs/draft-companion-execution-plan_20260816.md) for
 the product/architecture spec.
@@ -55,8 +57,9 @@ So a new machine is: clone → `uv sync` → `.env` → `lazy sync pull` (option
 
 ### Supabase setup (LS-11)
 
-Project `lazy-sleeper` (free tier: 500 MB Postgres, 1 GB Storage; ~140 MB / ~60 MB used after two
-seasons of history — Pro is the accepted fallback). One-time:
+Project `lazy-sleeper` (free tier: 500 MB Postgres, 1 GB Storage; ~165 MB / ~70 MB used as of 2026-08-19
+with two seasons of history — growing ~9.5 MB/day DB + ~7 MB/day Storage until LS-52/LS-53 land, since
+every daily pull appends a full ESPN kona vintage; Pro is the accepted fallback). One-time:
 
 1. Storage → **New bucket** `raw-snapshots`, private. (`SUPABASE_BUCKET` defaults to that name.)
 2. Project Settings → API Keys → create an `sb_secret_…` key → `SUPABASE_SECRET_KEY`; the project URL
@@ -133,6 +136,9 @@ lazy score def-rank                                      # season-average DEF st
 lazy score parity                                        # engine vs nflverse PPR on 2025 weekly actuals
 lazy benchmark season / weekly                           # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/
 lazy benchmark fit-weights && lazy weights show          # inverse-MAE blend weights → derived.ensemble_weights
+lazy board baselines                                     # replacement level per position (2023–25 avg + live)
+lazy board vorp --top 30                                 # the draft board: VORP + tier + gap + CLIFF columns
+lazy board config --cliff-gap 12                         # draft-day dial: stored tier/cliff thresholds
 lazy check freshness && lazy check joins                 # data-quality audit (see below)
 lazy check player "ja'marr chase" -t CIN                 # one-player dossier: ids, projections vs ours, actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
@@ -260,6 +266,38 @@ Providers (`providers/`): `ProjectionProvider` protocol → `SleeperProvider` / 
 vintage in `core.projections`, scored under league rules) and `EnsembleProvider(members, weights)`, whose
 `PlayerProjection.components` keeps each member's points for the disagreement flags in LS-29.
 
+## Draft board (E5)
+
+The board is three layers in `board/`, each pure functions over the previous one (LS-26/27/28):
+
+1. **Replacement baselines** (`board/baselines.py`) — replacement level = the points of the *last starter*
+   per position. Cutoffs are derived from the league payload (`total_rosters` × dedicated slots), and the
+   flex seats are filled greedily by value, most-restrictive seat first — so flex demand moves the RB/WR/TE
+   cutoffs with the data instead of a hardcoded share. On 2025 actuals this lands QB12 / RB30 / WR40 / TE14
+   (the plan doc's anchors within one flex seat). Historical baseline = per-season 2023–25 actuals averaged;
+   live baseline = re-derived from the current ensemble projections.
+2. **Flex-aware VORP** (`board/vorp.py`) — `points − baseline[position]`, ranked. Defaults to the **live**
+   baseline: measured against the same projection table, provider bias cancels (the benchmarks show
+   preseason QB/WR projections running +45–70 hot) and the last starter per position sits at exactly 0.
+   `--baseline historical` is the actuals-average x-check. Each row keeps the ensemble members' points
+   (`components`) for LS-29's disagreement flags.
+3. **Tiers + cliffs** (`board/tiers.py`) — adaptive gap-based tiers per position: a new tier starts where the
+   drop between consecutive players ≥ `max(min_gap, gap_multiplier × the position's median gap)` over its
+   draftable depth. The **CLIFF** flag is absolute and independent: drop to the next player at the position
+   ≥ `cliff_gap` season points (default 15 ≈ 1 pt/week) — "last chair before the music stops".
+
+Thresholds live in `derived.board_config` (one row, seeded by migration 0006) so they're adjustable
+mid-draft without a deploy: `lazy board config --cliff-gap 12 --gap-multiplier 3`, or from the app via
+`GET /board/config` / `PUT /board/config` (partial updates). `lazy board vorp --cliff-gap 20` overrides
+for one run without touching the stored values.
+
+```bash
+lazy board baselines                        # both baseline tables, cutoffs + flex fills shown
+lazy board vorp --top 30                    # full board: pts / base / vorp / pos_rk / tier / gap / CLIFF
+lazy board vorp -p RB --baseline historical # one position, actuals-average baseline
+lazy board config                           # show stored thresholds (no options = read-only)
+```
+
 ## Layout
 
 ```
@@ -277,6 +315,8 @@ lazy_sleeper/
   benchmark/    season + weekly scoreboards: ADP pool → provider projections vs scored actuals; report (CSV)
   providers/    ProjectionProvider; SleeperProvider/EspnProvider (stored vintages); EnsembleProvider; weights
                 (inverse-MAE fit + derived.* repository: fitted versions, overrides, config)
+  board/        draft board: baselines (roster-derived cutoffs), vorp (PlayerValue rows), tiers
+                (BoardRow: tier/cliff/gap), config (derived.board_config repository)
   model/        (M5 ForgeModel)
 tests/          unit tests + trimmed real-payload fixtures
 ```

@@ -13,10 +13,11 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-19 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 (PRs #1–#17).
-  172 tests, `ci` required on `main`. **M2 complete (2026-08-19).**
-- **Next up, in order:** M3 = LS-28→30
-  (tiers/cliffs, ADP delta/disagreement, `/board` + `lazy board regen`). M4 = LS-16 → LS-31–38.
+- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 (PRs #1–#18).
+  178 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 board core done 2026-08-19**
+  (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs, all in `board/`); LS-29/30 remain.
+- **Next up, in order:** LS-29 (ADP delta + disagreement flags — ensemble `components` already ride
+  on every `BoardRow`), LS-30 (`/board` + `lazy board regen`). Then M4 = LS-16 → LS-31–38.
 - **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
   STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
   latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
@@ -33,8 +34,15 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   bias cancels and the last starter sits at exactly 0); `--baseline historical` = 2023–25 actuals
   average x-check. 2025 flex skew is a DB-free test on the LS-21 parity fixture (16 WR/6 RB/2 TE —
   one seat off the plan's observed 17/5/2; weekly start/sit isn't recoverable from season totals).
+- **Tiers/cliffs (LS-28, `board/tiers.py`, migration 0006):** adaptive gap-based per position —
+  tier break at `gap ≥ max(min_gap, gap_multiplier × median gap over the position's depth window)`
+  (depth = benchmark pool sizes); **cliff** = absolute `gap_to_next ≥ cliff_gap` (default 15 season
+  pts ≈ 1/wk). Thresholds live in **`derived.board_config`** (single row, defaults 15/2.0/4.0),
+  app-adjustable via `GET/PUT /board/config` and `lazy board config` — the draft-day "scary" dial.
+  `assign_tiers(values, TierConfig) → BoardRow(value, tier, cliff, gap_to_next)`; `lazy board vorp`
+  shows tier/gap/CLIFF columns (`--cliff-gap` overrides per run). LS-30's `/board` renders BoardRow.
 - **Ops state (2026-08-19, LS-11/12/17 done):** **the shared DB is Supabase Postgres** — cut over via
-  `pg_dump | psql` (row counts verified identical; `check joins` baseline reproduced), migrations 0001–0005
+  `pg_dump | psql` (row counts verified identical; `check joins` baseline reproduced), migrations 0001–0006
   applied (0005 = RLS on `public.alembic_version` for the Supabase advisor). Local `.env` `DATABASE_URL` →
   Supabase session pooler (`postgresql+psycopg://postgres.<ref>:…@aws-0-us-east-1.pooler.supabase.com:5432/
   postgres`); the Docker DB is kept as `DATABASE_URL_LOCAL` for diffs only. Archive fully mirrored to

@@ -30,6 +30,12 @@ class ConfigBody(BaseModel):
     latest: bool = False  # True → clear the pin (use latest fitted)
 
 
+class BoardConfigBody(BaseModel):
+    cliff_gap: float | None = Field(None, gt=0)
+    gap_multiplier: float | None = Field(None, gt=0)
+    min_gap: float | None = Field(None, gt=0)
+
+
 def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:
     cfg = repo.config()
     latest = repo.latest_version()
@@ -145,6 +151,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         repo.set_config(use_overrides=body.use_overrides, weights_version=pin)
         session.commit()
         return _weights_payload(repo, SEASON)
+
+    @app.get("/board/config")
+    def board_config(
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Tier/cliff thresholds in force (defaults are seeded by migration 0006)."""
+        from lazy_sleeper.board import BoardConfigRepository
+
+        row = BoardConfigRepository(session).row()
+        return {
+            "cliff_gap": row.cliff_gap,
+            "gap_multiplier": row.gap_multiplier,
+            "min_gap": row.min_gap,
+            "updated_at": row.updated_at,
+        }
+
+    @app.put("/board/config")
+    def put_board_config(
+        body: BoardConfigBody,
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Adjust any subset of the tier/cliff thresholds (draft-day dial)."""
+        from lazy_sleeper.board import BoardConfigRepository
+
+        repo = BoardConfigRepository(session)
+        repo.set(
+            cliff_gap=body.cliff_gap,
+            gap_multiplier=body.gap_multiplier,
+            min_gap=body.min_gap,
+        )
+        session.commit()
+        row = repo.row()
+        return {
+            "cliff_gap": row.cliff_gap,
+            "gap_multiplier": row.gap_multiplier,
+            "min_gap": row.min_gap,
+            "updated_at": row.updated_at,
+        }
 
     return app
 

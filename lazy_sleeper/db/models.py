@@ -317,3 +317,16 @@ class EnsembleConfig(Base):
     use_overrides: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     weights_version: Mapped[int | None] = mapped_column(Integer)  # NULL = latest fitted
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BoardConfig(Base):
+    """Single-row tier/cliff thresholds for the draft board — adjustable live from the app."""
+
+    __tablename__ = "board_config"
+    __table_args__ = ({"schema": "derived"},)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # always 1
+    cliff_gap: Mapped[float] = mapped_column(Float, nullable=False)  # season pts to next player
+    gap_multiplier: Mapped[float] = mapped_column(Float, nullable=False)  # × median gap
+    min_gap: Mapped[float] = mapped_column(Float, nullable=False)  # tier-break floor, season pts
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
