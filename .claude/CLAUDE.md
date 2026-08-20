@@ -16,7 +16,19 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
   #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up:** M4 = LS-16 (draft picks/rosters → core) → LS-31–38 (live draft companion).
+- **Next up:** M4 = LS-31–38 (live draft companion); LS-16 (draft state → core) done 2026-08-20, PR #21.
+- **Draft state (LS-16, `ingest/league_loaders.py`, migration 0009):** `core.drafts` (one row per
+  draft: status/type/rounds/teams/pick_timer lifted from `settings`, `slot_to_roster_id`,
+  `draft_order` JSONB), `core.draft_picks` (PK `draft_id, pick_no`; **sync** semantics — upsert what's
+  in the payload, delete that draft's picks that aren't → commissioner undo converges), `core.rosters`
+  (PK `league_id, roster_id`; player lists JSONB), `core.league_users` (`display_name`, `team_name`
+  from metadata). **Sleeper picks carry no timestamp** → `first_seen_at` = `pulled_at` of the snapshot
+  that first showed the pick, kept on conflict (accurate to the poll interval). `picked_by == ""` =
+  autopick → NULL. `parse_*` are pure (tested on fixtures; the picks fixture is hand-built from
+  Sleeper's documented shape — no real 2026 picks exist yet); `load_*` upsert via attr→column map
+  (`metadata_` ↔ `metadata`). CLI: `lazy load league [--draft-id]`, `lazy pull league --load`,
+  `lazy pull picks --draft-id <mock> --load` = the way to exercise the poller on a Sleeper mock draft
+  before 9/4. Not in the daily workflow (draft state is a draft-night poll, not a daily pull).
 - **Board serving (LS-30, `board/store.py` + `board/render.py`, migration 0008):** `regenerate(session,
   provider, rules, scorer, season, baseline=)` = `build_board` + `core.players` name/injury join →
   `derived.boards` (dated, immutable, `config` JSONB snapshot) + `derived.board_rows` (flattened

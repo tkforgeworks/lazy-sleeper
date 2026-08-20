@@ -1,0 +1,72 @@
+[
+ {
+  "co_owners": null,
+  "keepers": [],
+  "league_id": "1392685475625443328",
+  "metadata": null,
+  "owner_id": "1264388068945694720",
+  "player_map": null,
+  "players": [],
+  "reserve": [],
+  "roster_id": 1,
+  "settings": {
+   "division": 1,
+   "fpts": 0,
+   "fpts_decimal": 0,
+   "losses": 0,
+   "ties": 0,
+   "total_moves": 0,
+   "waiver_budget_used": 0,
+   "waiver_position": 12,
+   "wins": 0
+  },
+  "starters": [
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0"
+  ],
+  "taxi": []
+ },
+ {
+  "co_owners": null,
+  "keepers": [],
+  "league_id": "1392685475625443328",
+  "metadata": null,
+  "owner_id": "1123829782162055168",
+  "player_map": null,
+  "players": [],
+  "reserve": [],
+  "roster_id": 2,
+  "settings": {
+   "division": 2,
+   "fpts": 0,
+   "fpts_decimal": 0,
+   "losses": 0,
+   "ties": 0,
+   "total_moves": 0,
+   "waiver_budget_used": 0,
+   "waiver_position": 11,
+   "wins": 0
+  },
+  "starters": [
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0",
+   "0"
+  ],
+  "taxi": []
+ }
+]
