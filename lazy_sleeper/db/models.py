@@ -329,4 +329,10 @@ class BoardConfig(Base):
     cliff_gap: Mapped[float] = mapped_column(Float, nullable=False)  # season pts to next player
     gap_multiplier: Mapped[float] = mapped_column(Float, nullable=False)  # × median gap
     min_gap: Mapped[float] = mapped_column(Float, nullable=False)  # tier-break floor, season pts
+    # LS-29 flag thresholds (migration 0007)
+    adp_min_delta: Mapped[float] = mapped_column(Float, nullable=False, default=12.0)
+    adp_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.25)
+    disagree_min_pts: Mapped[float] = mapped_column(Float, nullable=False, default=20.0)
+    disagree_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.15)
+    debias_disagreement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

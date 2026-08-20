@@ -11,13 +11,13 @@ M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benc
 draft board → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
 Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
-## Status (updated 2026-08-19 — refresh this block whenever a story merges)
+## Status (updated 2026-08-20 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 (PRs #1–#18).
-  178 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 board core done 2026-08-19**
-  (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs, all in `board/`); LS-29/30 remain.
-- **Next up, in order:** LS-29 (ADP delta + disagreement flags — ensemble `components` already ride
-  on every `BoardRow`), LS-30 (`/board` + `lazy board regen`). Then M4 = LS-16 → LS-31–38.
+- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29 (PRs #1–#19).
+  186 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 board logic done 2026-08-20**
+  (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags, all in `board/`); LS-30 remains.
+- **Next up, in order:** LS-30 (`/board` + `lazy board regen` — render `build_board(...)` rows; the
+  JSON shape is `BoardRow` flattened). Then M4 = LS-16 → LS-31–38.
 - **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
   STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
   latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
@@ -41,6 +41,19 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   app-adjustable via `GET/PUT /board/config` and `lazy board config` — the draft-day "scary" dial.
   `assign_tiers(values, TierConfig) → BoardRow(value, tier, cliff, gap_to_next)`; `lazy board vorp`
   shows tier/gap/CLIFF columns (`--cliff-gap` overrides per run). LS-30's `/board` renders BoardRow.
+- **Flags (LS-29, `board/flags.py`, migration 0007):** `flag_adp(rows, latest_adp(s, season), cfg)` —
+  `adp_delta = adp_ppr − overall board rank`, flag `value`/`reach` at `|Δ| ≥ max(adp_min_delta 12,
+  adp_pct 0.25 × adp)`; must run on the *unfiltered* VORP-ordered board (rank = row index).
+  `flag_disagreement(rows, cfg)` — spread between ensemble `components` (sleeper/espn), flag at
+  `≥ max(disagree_min_pts 20, disagree_pct 0.15 × points)`; **`debias_disagreement`** (default on)
+  rescales each member by its position-median ratio to the blend first (raw: 27/32 DEFs flag from
+  Sleeper's systematic DEF under-projection; debiased: only real splits). All five thresholds live on
+  `TierConfig` / `derived.board_config` (`lazy board config --no-debias …`, `PUT /board/config`).
+  `build_board(provider, shape, season, cfg, adp_by_id, baselines=None)` = vorp → tiers → flags
+  in one call (LS-30's entry point). Known read: K/DEF all show `value` because the market drafts them
+  50–100 picks after their VORP rank — a per-position ADP rank would fix it (possible follow-up).
+  `lazy board vorp` has `adp/dadp/spread/flags` columns and `--flags-only`; header uses `dadp` not `Δ`
+  (Windows cp1252 console can't print it).
 - **Ops state (2026-08-19, LS-11/12/17 done):** **the shared DB is Supabase Postgres** — cut over via
   `pg_dump | psql` (row counts verified identical; `check joins` baseline reproduced), migrations 0001–0006
   applied (0005 = RLS on `public.alembic_version` for the Supabase advisor). Local `.env` `DATABASE_URL` →

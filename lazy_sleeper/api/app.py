@@ -34,6 +34,11 @@ class BoardConfigBody(BaseModel):
     cliff_gap: float | None = Field(None, gt=0)
     gap_multiplier: float | None = Field(None, gt=0)
     min_gap: float | None = Field(None, gt=0)
+    adp_min_delta: float | None = Field(None, gt=0)
+    adp_pct: float | None = Field(None, gt=0)
+    disagree_min_pts: float | None = Field(None, gt=0)
+    disagree_pct: float | None = Field(None, gt=0)
+    debias_disagreement: bool | None = None
 
 
 def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:
@@ -156,39 +161,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def board_config(
         session: Session = Depends(get_session),  # noqa: B008
     ) -> dict[str, Any]:
-        """Tier/cliff thresholds in force (defaults are seeded by migration 0006)."""
+        """Tier/cliff/flag thresholds in force (defaults seeded by migrations 0006/0007)."""
         from lazy_sleeper.board import BoardConfigRepository
 
-        row = BoardConfigRepository(session).row()
-        return {
-            "cliff_gap": row.cliff_gap,
-            "gap_multiplier": row.gap_multiplier,
-            "min_gap": row.min_gap,
-            "updated_at": row.updated_at,
-        }
+        return BoardConfigRepository(session).as_dict()
 
     @app.put("/board/config")
     def put_board_config(
         body: BoardConfigBody,
         session: Session = Depends(get_session),  # noqa: B008
     ) -> dict[str, Any]:
-        """Adjust any subset of the tier/cliff thresholds (draft-day dial)."""
+        """Adjust any subset of the tier/cliff/flag thresholds (draft-day dial)."""
         from lazy_sleeper.board import BoardConfigRepository
 
         repo = BoardConfigRepository(session)
-        repo.set(
-            cliff_gap=body.cliff_gap,
-            gap_multiplier=body.gap_multiplier,
-            min_gap=body.min_gap,
-        )
+        repo.set(**body.model_dump())
         session.commit()
-        row = repo.row()
-        return {
-            "cliff_gap": row.cliff_gap,
-            "gap_multiplier": row.gap_multiplier,
-            "min_gap": row.min_gap,
-            "updated_at": row.updated_at,
-        }
+        return repo.as_dict()
 
     return app
 
