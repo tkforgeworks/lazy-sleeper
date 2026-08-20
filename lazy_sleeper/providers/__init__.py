@@ -19,6 +19,24 @@ from lazy_sleeper.providers.weights import (
     to_json,
 )
 
+
+def make_provider(session, scorer, name: str) -> ProjectionProvider:  # noqa: ANN001
+    """`sleeper` | `espn` | `ensemble` — league-scored projections from stored vintages.
+
+    The one place provider names are resolved; CLI and API both wire through here.
+    """
+    if name == "sleeper":
+        return SleeperProvider(session, scorer)
+    if name == "espn":
+        return EspnProvider(session, scorer)
+    if name == "ensemble":
+        return EnsembleProvider(
+            [SleeperProvider(session, scorer), EspnProvider(session, scorer)],
+            WeightRepository(session),
+        )
+    raise ValueError(f"unknown provider {name!r} (sleeper | espn | ensemble)")
+
+
 __all__ = [
     "SEASON",
     "WEEKLY",
@@ -36,6 +54,7 @@ __all__ = [
     "fit_from_csvs",
     "fit_weights",
     "horizon_for",
+    "make_provider",
     "normalize",
     "to_json",
 ]

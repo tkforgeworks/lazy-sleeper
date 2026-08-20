@@ -12,9 +12,9 @@ FastAPI surface. The Flutter client lives in a separate repo (`lazy-sleeper-app`
 **M0–M2 done (2026-08-19):** ingestion + immutable snapshot archive, league scoring engine (QB–DEF, parity
 vs nflverse), season + weekly provider benchmarks, provider abstraction + fitted ensemble weights, and the
 ops floor — shared Supabase Postgres (cut over 2026-08-19), archive mirrored to Supabase Storage, daily
-pull running from GitHub Actions. **M3 board logic done (2026-08-20):** replacement baselines, flex-aware
-VORP, tiers + cliff flags, ADP-delta + provider-disagreement flags (`lazy board …`, see "Draft board"
-below). Remaining for M3: LS-30 (`/board` + daily regen). See
+pull running from GitHub Actions. **M3 complete (2026-08-20):** replacement baselines, flex-aware VORP,
+tiers + cliff flags, ADP-delta + provider-disagreement flags, persisted daily boards served at `GET /board`
+/ `/board.html` (`lazy board …`, see "Draft board" below). Next: M4 live draft companion. See
 [`docs/execution-plan-analysis_20260816.md`](docs/execution-plan-analysis_20260816.md) for the milestone plan
 and [`docs/draft-companion-execution-plan_20260816.md`](docs/draft-companion-execution-plan_20260816.md) for
 the product/architecture spec.
@@ -309,7 +309,27 @@ lazy board vorp --top 30                    # full board: … tier / gap / adp /
 lazy board vorp --flags-only --top 40       # just the value / reach / DISAGREE rows
 lazy board vorp -p RB --baseline historical # one position, actuals-average baseline
 lazy board config                           # show stored thresholds (no options = read-only)
+lazy board regen                            # persist a dated board + data/boards/board_latest.{csv,html}
 ```
+
+### Serving the board (LS-30)
+
+`lazy board regen` runs the pipeline over whatever is in `core.*` right now and **persists** the result as a
+new dated board (`derived.boards` + one `derived.board_rows` row per player: everything above plus name,
+team and Sleeper `injury_status`), and writes CSV + a self-contained HTML page under `data/boards/`
+(gitignored; the daily workflow uploads `board_latest.*` as a 14-day artifact). Every run is a new board —
+nothing is overwritten, so a board can always be pinned to "what we saw that morning".
+
+The API serves the **latest persisted board**, not a per-request recompute — stable between regens, and a
+half-loaded pull can't leak into the draft-night view:
+
+| Endpoint | What |
+|---|---|
+| `GET /board?season=2026&provider=ensemble&position=RB&limit=50` | `{board: meta, rows: [...]}` — ranked rows with points / VORP / tier / cliff / ADP delta + flag / spread + disagree / injury. `rank` is the overall board rank even when filtered. 404 until the first regen. |
+| `GET /board.html` | The same board as a single HTML file (position buttons, flag colours) — the draft-night fallback if the Flutter client misbehaves. |
+| `POST /board/regen` `{season, provider, baseline}` | On-demand regen under the current `board_config` — how a `PUT /board/config` change becomes visible without waiting for the 06:00 ET job. |
+
+The daily workflow (`daily-pull.yml`) runs `lazy board regen` after the pull + load + freshness steps.
 
 ## Layout
 
