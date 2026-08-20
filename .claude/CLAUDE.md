@@ -16,7 +16,17 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
   #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up:** M4 = LS-31–38 (live draft companion); LS-16 (draft state → core) done 2026-08-20, PR #21.
+- **Next up: LS-31** (first live-companion story — read the ticket, propose poller + draft-state model
+  shape before coding). LS-16 (draft state → core) done 2026-08-20, PR #21.
+- **Mock-draft rehearsal (2026-08-20):** league mock `1396298350046760960` (`metadata.type=league_mock`,
+  started from the real league: 12 teams, 15 rds, 120 s) drafted to `complete`; polled with
+  `lazy pull picks --draft-id … --load` every 20 s → 12 polls, 180 picks, 0 removals, loader unchanged.
+  Its rows stay in `core.drafts`/`core.draft_picks` as **dev data for M4** (static — do not re-pull).
+  Lessons for the state model: key seats on **`draft_slot`** (mock picks have `roster_id` NULL and the
+  draft has `league_id` NULL; `slot_to_roster_id` exists in both) with `core.drafts.slot_to_roster_id`
+  as the bridge; `draft_order` = `{user_id: slot}` — Tim = `1268591266036203520`, slot 8 in the mock
+  (add `sleeper_user_id` to Settings for "my seat"); CPU picks have `picked_by ""` → NULL; payload
+  also carries `reactions` (null, ignored). Status seen: `pre_draft` → `complete` (`last_picked` set).
 - **Draft state (LS-16, `ingest/league_loaders.py`, migration 0009):** `core.drafts` (one row per
   draft: status/type/rounds/teams/pick_timer lifted from `settings`, `slot_to_roster_id`,
   `draft_order` JSONB), `core.draft_picks` (PK `draft_id, pick_no`; **sync** semantics — upsert what's
