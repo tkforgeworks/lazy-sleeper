@@ -14,9 +14,10 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 ## Status (updated 2026-08-19 — refresh this block whenever a story merges)
 
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 (PRs #1–#18).
-  178 tests, `ci` required on `main`. **M2 complete (2026-08-19).**
-- **Next up, in order:** M3 = LS-29→30
-  (ADP delta/disagreement, `/board` + `lazy board regen`). M4 = LS-16 → LS-31–38.
+  178 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 board core done 2026-08-19**
+  (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs, all in `board/`); LS-29/30 remain.
+- **Next up, in order:** LS-29 (ADP delta + disagreement flags — ensemble `components` already ride
+  on every `BoardRow`), LS-30 (`/board` + `lazy board regen`). Then M4 = LS-16 → LS-31–38.
 - **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
   STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
   latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
