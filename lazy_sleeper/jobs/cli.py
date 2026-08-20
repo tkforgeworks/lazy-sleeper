@@ -17,6 +17,7 @@ lazy benchmark season|weekly    # Sleeper/ESPN/naive vs 2024–25 actuals → da
 lazy benchmark fit-weights      # inverse-MAE blend weights → derived.ensemble_weights + JSON
 lazy weights show|set|clear|config   # fitted vs manual-override blend weights (the λ switch)
 lazy score preview --source ensemble # blended projections with each member's column
+lazy board baselines            # replacement-level points per position (historical + live)
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -905,6 +906,52 @@ def weights_config(
             f"use_overrides={cfg.use_overrides}  weights_version="
             f"{cfg.weights_version if cfg.weights_version is not None else f'latest ({latest})'}"
         )
+
+
+# --- board -----------------------------------------------------------------
+board_app = typer.Typer(no_args_is_help=True)
+app.add_typer(board_app, name="board", help="Draft board: baselines, VORP, tiers")
+
+
+@board_app.command("baselines")
+def board_baselines(
+    season: int = typer.Option(2026, help="Season for the live projection baseline"),
+    provider: str = typer.Option("ensemble", help="sleeper | espn | ensemble"),
+) -> None:
+    """Replacement-level points per position: 2023–25 actuals average vs live projections.
+
+    Cutoffs come from the league roster (teams × dedicated slots + flex filled greedily by
+    value), so they move with the points table instead of being hardcoded.
+    """
+    from lazy_sleeper.board import RosterShape, historical_baselines, live_baselines
+    from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rules = load_league_rules(s, ctx.store)
+        shape = RosterShape.from_rules(rules)
+        hist = historical_baselines(s, default_scorer(rules), shape)
+        live = live_baselines(ctx.provider(s, provider), shape, season)
+
+    slots = " ".join(f"{p}{n}" for p, n in shape.dedicated.items())
+    flex = ", ".join("/".join(e) for e in shape.flex) or "none"
+    typer.echo(f"{shape.teams} teams  {slots}  flex: {flex}")
+
+    typer.echo("\nhistorical actuals (baseline pts @ cutoff rank):")
+    header = f"{'pos':<5}" + "".join(f"{yr:>14}" for yr in hist.seasons) + f"{'avg':>9}"
+    typer.echo(header)
+    for pos in [p for p in ("QB", "RB", "WR", "TE", "K", "DEF") if p in hist.average]:
+        cells = ""
+        for yr in hist.seasons:
+            b = hist.per_season[yr].get(pos)
+            cells += f"{f'{b.points:.1f} @{b.cutoff_rank}':>14}" if b else f"{'-':>14}"
+        typer.echo(f"{pos:<5}{cells}{hist.average[pos]:>9.1f}")
+
+    typer.echo(f"\nlive {provider} {season} projections:")
+    typer.echo(f"{'pos':<5}{'cutoff':>7}{'baseline':>10}{'flex_fills':>12}")
+    for pos in [p for p in ("QB", "RB", "WR", "TE", "K", "DEF") if p in live]:
+        b = live[pos]
+        typer.echo(f"{pos:<5}{b.cutoff_rank:>7}{b.points:>10.1f}{b.flex_fills:>12}")
 
 
 # --- sync ------------------------------------------------------------------

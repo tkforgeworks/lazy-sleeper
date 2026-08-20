@@ -27,6 +27,7 @@ def test_rules_from_league_payload(rules: ScoringRules) -> None:
     assert rules.league_id == "1392685475625443328"
     assert rules.roster_positions[:3] == ("QB", "RB", "RB")
     assert rules.roster_positions.count("FLEX") == 2
+    assert rules.total_rosters == 12
     # the league's known values
     assert rules["pass_td"] == 4.0
     assert rules["pass_yd"] == pytest.approx(0.04)
