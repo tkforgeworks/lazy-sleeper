@@ -18,7 +18,8 @@ lazy benchmark fit-weights      # inverse-MAE blend weights → derived.ensemble
 lazy weights show|set|clear|config   # fitted vs manual-override blend weights (the λ switch)
 lazy score preview --source ensemble # blended projections with each member's column
 lazy board baselines            # replacement-level points per position (historical + live)
-lazy board vorp --top 30        # draft-pool VORP vs the live (or --baseline historical) baseline
+lazy board vorp --top 30        # draft-pool VORP + tiers/cliffs vs the live baseline
+lazy board config               # show/update stored tier & cliff thresholds (draft-day dial)
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -962,16 +963,27 @@ def board_vorp(
     baseline: str = typer.Option("live", help="live | historical"),
     position: str | None = typer.Option(None, "--position", "-p", help="Filter one position"),
     top: int = typer.Option(50, help="Rows to print"),
+    cliff_gap: float | None = typer.Option(None, help="Override the stored cliff threshold"),
 ) -> None:
-    """Draft-pool VORP: points − replacement baseline, flex demand baked into the baseline.
+    """Draft-pool VORP with tier and cliff columns.
 
     `live` measures against a baseline derived from the same projections (provider bias
     cancels; the last starter per position sits at exactly 0). `historical` measures against
-    the 2023–25 actuals average instead.
+    the 2023–25 actuals average instead. Tier/cliff thresholds come from `derived.board_config`
+    (adjust via `lazy board config` or `PUT /board/config`).
     """
+    from dataclasses import replace
+
     from sqlalchemy import select
 
-    from lazy_sleeper.board import RosterShape, historical_baselines, live_vorp, vorp_board
+    from lazy_sleeper.board import (
+        BoardConfigRepository,
+        RosterShape,
+        assign_tiers,
+        historical_baselines,
+        live_vorp,
+        vorp_board,
+    )
     from lazy_sleeper.db.models import Player
     from lazy_sleeper.scoring import default_scorer, load_league_rules
 
@@ -981,31 +993,62 @@ def board_vorp(
         shape = RosterShape.from_rules(rules)
         prov = ctx.provider(s, provider)
         if baseline == "live":
-            board = live_vorp(prov, shape, season)
+            values = live_vorp(prov, shape, season)
         elif baseline == "historical":
             avg = historical_baselines(s, default_scorer(rules), shape).average
-            board = vorp_board(prov.projections(season), avg)
+            values = vorp_board(prov.projections(season), avg)
         else:
             raise typer.BadParameter("baseline must be live | historical")
+        config = BoardConfigRepository(s).get()
+        if cliff_gap is not None:
+            config = replace(config, cliff_gap=cliff_gap)
+        board = assign_tiers(values, config)
         if position:
-            board = [v for v in board if v.position == position.upper()]
+            board = [r for r in board if r.value.position == position.upper()]
         rows = board[:top]
         names = dict(
             s.execute(
                 select(Player.sleeper_id, Player.full_name).where(
-                    Player.sleeper_id.in_({v.sleeper_id for v in rows})
+                    Player.sleeper_id.in_({r.value.sleeper_id for r in rows})
                 )
             ).all()
         )
     typer.echo(
-        f"{'rk':<4}{'pos':<5}{'team':<5}{'player':<26}{'pts':>8}{'base':>8}{'vorp':>8}{'pos_rk':>7}"
+        f"{'rk':<4}{'pos':<5}{'team':<5}{'player':<26}{'pts':>8}{'base':>8}{'vorp':>8}"
+        f"{'pos_rk':>7}{'tier':>6}{'gap':>7}  cliff"
     )
-    for i, v in enumerate(rows, start=1):
+    for i, r in enumerate(rows, start=1):
+        v = r.value
         name = names.get(v.sleeper_id, v.sleeper_id)
+        tier = str(r.tier) if r.tier is not None else "-"
+        gap = f"{r.gap_to_next:.1f}" if r.gap_to_next is not None else "-"
         typer.echo(
             f"{i:<4}{v.position:<5}{v.team or '':<5}{name[:25]:<26}"
             f"{v.points:>8.1f}{v.baseline:>8.1f}{v.vorp:>8.1f}{v.pos_rank:>7}"
+            f"{tier:>6}{gap:>7}  {'CLIFF' if r.cliff else ''}"
         )
+
+
+@board_app.command("config")
+def board_config_cmd(
+    cliff_gap: float | None = typer.Option(None, help="Season-points drop → cliff flag"),
+    gap_multiplier: float | None = typer.Option(None, help="Tier break at × median gap"),
+    min_gap: float | None = typer.Option(None, help="Tier-break floor in season points"),
+) -> None:
+    """Show (no options) or update the stored tier/cliff thresholds."""
+    from lazy_sleeper.board import BoardConfigRepository
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        repo = BoardConfigRepository(s)
+        try:
+            cfg = repo.set(cliff_gap=cliff_gap, gap_multiplier=gap_multiplier, min_gap=min_gap)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+    typer.echo(
+        f"cliff_gap={cfg.cliff_gap:g}  gap_multiplier={cfg.gap_multiplier:g}  "
+        f"min_gap={cfg.min_gap:g}"
+    )
 
 
 # --- sync ------------------------------------------------------------------
