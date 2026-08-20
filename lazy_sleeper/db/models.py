@@ -387,3 +387,90 @@ class BoardEntry(Base):
     spread: Mapped[float | None] = mapped_column(Float)
     disagree: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     components: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class Draft(Base):
+    """Sleeper draft metadata (LS-16): slot order, status, timer. Upserted from `/draft/{id}`."""
+
+    __tablename__ = "drafts"
+    __table_args__ = {"schema": "core"}
+
+    draft_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    league_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    season: Mapped[int | None] = mapped_column(Integer)
+    type: Mapped[str | None] = mapped_column(String(16))  # snake | linear | auction
+    status: Mapped[str | None] = mapped_column(
+        String(16)
+    )  # pre_draft | drafting | paused | complete
+    start_time: Mapped[int | None] = mapped_column(BigInteger)  # epoch ms
+    last_picked: Mapped[int | None] = mapped_column(BigInteger)  # epoch ms
+    rounds: Mapped[int | None] = mapped_column(Integer)
+    teams: Mapped[int | None] = mapped_column(Integer)
+    pick_timer: Mapped[int | None] = mapped_column(Integer)  # seconds
+    settings: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+    slot_to_roster_id: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # "slot" -> roster_id
+    draft_order: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # user_id -> slot
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raw.snapshots.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DraftPick(Base):
+    """One made pick. Synced with the payload: upserted by (draft_id, pick_no); picks no longer in
+    the payload (commissioner undo) are deleted. `first_seen_at` = pulled_at of the snapshot that
+    first showed it — Sleeper's pick payload carries no timestamp."""
+
+    __tablename__ = "draft_picks"
+    __table_args__ = (
+        Index("ix_draft_picks_draft_player", "draft_id", "sleeper_id"),
+        {"schema": "core"},
+    )
+
+    draft_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    pick_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    round: Mapped[int | None] = mapped_column(Integer)
+    draft_slot: Mapped[int | None] = mapped_column(Integer)
+    roster_id: Mapped[int | None] = mapped_column(Integer)
+    picked_by: Mapped[str | None] = mapped_column(String(32))  # user_id ("" on autopick)
+    sleeper_id: Mapped[str | None] = mapped_column(String(16))
+    is_keeper: Mapped[bool | None] = mapped_column(Boolean)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raw.snapshots.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Roster(Base):
+    """League roster (LS-16): owner + player lists + standings settings. Upserted."""
+
+    __tablename__ = "rosters"
+    __table_args__ = {"schema": "core"}
+
+    league_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    roster_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    co_owners: Mapped[list[Any] | None] = mapped_column(JSONB)
+    players: Mapped[list[Any] | None] = mapped_column(JSONB)
+    starters: Mapped[list[Any] | None] = mapped_column(JSONB)
+    reserve: Mapped[list[Any] | None] = mapped_column(JSONB)
+    taxi: Mapped[list[Any] | None] = mapped_column(JSONB)
+    keepers: Mapped[list[Any] | None] = mapped_column(JSONB)
+    settings: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raw.snapshots.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class LeagueUser(Base):
+    """League member (LS-16): the name behind a roster's owner_id. Upserted."""
+
+    __tablename__ = "league_users"
+    __table_args__ = {"schema": "core"}
+
+    league_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    display_name: Mapped[str | None] = mapped_column(String(64))
+    team_name: Mapped[str | None] = mapped_column(String(128))  # metadata.team_name
+    avatar: Mapped[str | None] = mapped_column(String(64))
+    is_owner: Mapped[bool | None] = mapped_column(Boolean)  # commissioner flag
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raw.snapshots.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

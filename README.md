@@ -130,6 +130,8 @@ lazy db upgrade                                          # alembic upgrade head
 lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
 lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
 lazy load stats                                          # → core.projections/actuals/adp/snap_counts/expected_points
+lazy pull league --load                                  # league/users/rosters/draft/picks → core.drafts/draft_picks/rosters/league_users
+lazy pull picks --draft-id <mock draft id> --load        # draft-night poll target; point at a Sleeper mock to rehearse
 lazy score rules                                         # the league's scoring_settings (latest league snapshot)
 lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
@@ -330,6 +332,22 @@ half-loaded pull can't leak into the draft-night view:
 | `POST /board/regen` `{season, provider, baseline}` | On-demand regen under the current `board_config` — how a `PUT /board/config` change becomes visible without waiting for the 06:00 ET job. |
 
 The daily workflow (`daily-pull.yml`) runs `lazy board regen` after the pull + load + freshness steps.
+
+## Draft state (LS-16, the M4 input)
+
+`lazy pull league --load` / `lazy load league` parse the Sleeper league-state snapshots into current-state
+tables (upsert, re-runnable as often as the draft-night poller likes):
+
+| Table | Key | Notes |
+|---|---|---|
+| `core.drafts` | `draft_id` | status / type / `rounds` / `teams` / `pick_timer` lifted from `settings`; `slot_to_roster_id` and `draft_order` kept as JSONB |
+| `core.draft_picks` | `draft_id, pick_no` | **sync** semantics: picks in the payload are upserted, that draft's picks *not* in the payload are deleted — a commissioner "undo pick" converges. Sleeper's pick payload has no timestamp, so `first_seen_at` = `pulled_at` of the snapshot that first showed the pick (kept on later polls; accurate to the poll interval). `picked_by = ""` (autopick) → NULL |
+| `core.rosters` | `league_id, roster_id` | `owner_id` → `league_users`; `players` / `starters` / `reserve` / `taxi` / `keepers` as JSONB lists |
+| `core.league_users` | `league_id, user_id` | `display_name`, `team_name` (from metadata), `is_owner` (commissioner) |
+
+Rehearsal: join a Sleeper mock draft, then `lazy pull picks --draft-id <its id> --load` on a loop — the
+loader, sync/undo handling and `first_seen_at` get exercised on real pick payloads before 2026-09-04.
+Draft state is not part of the daily workflow; it's polled on draft night.
 
 ## Layout
 

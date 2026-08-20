@@ -1,0 +1,54 @@
+[
+ {
+  "round": 1,
+  "roster_id": 1,
+  "player_id": "9221",
+  "picked_by": "1264388068945694720",
+  "pick_no": 1,
+  "draft_slot": 1,
+  "is_keeper": null,
+  "draft_id": "1392685476523024384",
+  "metadata": {
+   "first_name": "Jahmyr",
+   "last_name": "Gibbs",
+   "position": "RB",
+   "team": "DET",
+   "player_id": "9221",
+   "years_exp": "3"
+  }
+ },
+ {
+  "round": 1,
+  "roster_id": 2,
+  "player_id": "9509",
+  "picked_by": "978739257105756160",
+  "pick_no": 2,
+  "draft_slot": 2,
+  "is_keeper": null,
+  "draft_id": "1392685476523024384",
+  "metadata": {
+   "first_name": "Bijan",
+   "last_name": "Robinson",
+   "position": "RB",
+   "team": "ATL",
+   "player_id": "9509"
+  }
+ },
+ {
+  "round": 1,
+  "roster_id": 3,
+  "player_id": "9493",
+  "picked_by": "",
+  "pick_no": 3,
+  "draft_slot": 3,
+  "is_keeper": null,
+  "draft_id": "1392685476523024384",
+  "metadata": {
+   "first_name": "Puka",
+   "last_name": "Nacua",
+   "position": "WR",
+   "team": "LAR",
+   "player_id": "9493"
+  }
+ }
+]

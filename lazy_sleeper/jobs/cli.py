@@ -3,12 +3,13 @@
 lazy pull daily                 # players + 2026 season projections + ESPN 2026 + crosswalk
 lazy pull projections 2025 --week 3
 lazy pull espn 2026
-lazy pull league                # league, users, rosters, draft, draft picks
-lazy pull picks                 # just draft picks (poll target for draft night)
+lazy pull league --load         # league, users, rosters, draft, draft picks (+ load into core.*)
+lazy pull picks --load          # just draft picks (draft-night poll target; --draft-id <mock>)
 lazy pull nflverse 2025         # weekly stats + snap counts
 lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
 lazy load players               # latest valid players snapshot → core.players
 lazy load crosswalk
+lazy load league                # league-state snapshots → core.drafts/draft_picks/rosters/users
 lazy load stats                 # not-yet-loaded snapshots → projections/actuals/adp/snaps/xfp
 lazy load stats --source sleeper --season 2026   # only matching snapshots
 lazy snapshots reindex          # re-register local archive files after a DB reset
@@ -144,19 +145,37 @@ def pull_espn(season: int) -> None:
 
 
 @pull_app.command("league")
-def pull_league() -> None:
+def pull_league(
+    draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
+    load: bool = typer.Option(False, help="Also load the snapshots into core.* (lazy load league)"),
+) -> None:
+    """Snapshot league, users, rosters, draft and picks."""
     ctx = _Ctx()
+    did = draft_id or ctx.settings.sleeper_draft_id
     with session_scope(ctx.sessions) as s:
-        ctx.puller(s).pull_league_state(
-            ctx.settings.sleeper_league_id, ctx.settings.sleeper_draft_id
-        )
+        ctx.puller(s).pull_league_state(ctx.settings.sleeper_league_id, did)
+    if load:
+        _load_league(ctx, did)
 
 
 @pull_app.command("picks")
-def pull_picks() -> None:
+def pull_picks(
+    draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
+    load: bool = typer.Option(False, help="Also sync core.draft_picks from the snapshot"),
+) -> None:
+    """Snapshot just the picks — the draft-night poll target. Point --draft-id at a Sleeper mock
+    draft you've joined to exercise the loader on real picks before the live draft."""
+    from lazy_sleeper.ingest.league_loaders import load_draft_picks
+
     ctx = _Ctx()
+    did = draft_id or ctx.settings.sleeper_draft_id
     with session_scope(ctx.sessions) as s:
-        ctx.puller(s).pull_draft_picks(ctx.settings.sleeper_draft_id)
+        snap = ctx.puller(s).pull_draft_picks(did)
+        if load:
+            n, gone = load_draft_picks(
+                s, ctx.store.read(snap.storage_path), did, snap.id, snap.pulled_at
+            )
+            typer.echo(f"draft {did}: {n} picks synced, {gone} removed")
 
 
 @pull_app.command("nflverse")
@@ -245,6 +264,53 @@ def load_crosswalk_cmd() -> None:
             raise typer.BadParameter("no valid crosswalk snapshot; run `lazy pull crosswalk` first")
         n = load_crosswalk(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} crosswalk rows from snapshot {snap.id}")
+
+
+def _load_league(ctx: _Ctx, draft_id: str) -> None:
+    """Latest valid snapshot of each league-state kind → core.drafts/draft_picks/rosters/users."""
+    from lazy_sleeper.ingest.league_loaders import (
+        load_draft,
+        load_draft_picks,
+        load_league_users,
+        load_rosters,
+    )
+
+    with session_scope(ctx.sessions) as s:
+        repo = SnapshotRepository(s)
+
+        def latest(kind: str):  # noqa: ANN202
+            snap = repo.latest(SnapshotKey("sleeper", kind))
+            if snap is None:
+                raise typer.BadParameter(
+                    f"no valid sleeper/{kind} snapshot; run `lazy pull league`"
+                )
+            return snap, ctx.store.read(snap.storage_path)
+
+        snap, payload = latest("league_users")
+        typer.echo(f"users: {load_league_users(s, payload, snap.id)} (snapshot {snap.id})")
+        snap, payload = latest("league_rosters")
+        typer.echo(f"rosters: {load_rosters(s, payload, snap.id)} (snapshot {snap.id})")
+        snap, payload = latest("draft")
+        loaded_id = load_draft(s, payload, snap.id)
+        typer.echo(f"draft: {loaded_id} (snapshot {snap.id})")
+        if loaded_id != draft_id:
+            typer.echo(
+                f"  note: latest draft snapshot is {loaded_id}, syncing picks for {draft_id}"
+            )
+        snap, payload = latest("draft_picks")
+        n, gone = load_draft_picks(s, payload, draft_id, snap.id, snap.pulled_at)
+        typer.echo(f"picks: {n} synced, {gone} removed (snapshot {snap.id})")
+
+
+@load_app.command("league")
+def load_league_cmd(
+    draft_id: str | None = typer.Option(
+        None, help="Draft whose picks to sync (default: configured)"
+    ),
+) -> None:
+    """Load the latest league-state snapshots into core.* (upsert; re-runnable any time)."""
+    ctx = _Ctx()
+    _load_league(ctx, draft_id or ctx.settings.sleeper_draft_id)
 
 
 @load_app.command("stats")

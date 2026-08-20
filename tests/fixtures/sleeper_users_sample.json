@@ -1,0 +1,28 @@
+[
+ {
+  "avatar": "82aec8e811b839b8ec25d7b458afd57b",
+  "display_name": "dougkr",
+  "is_bot": false,
+  "is_owner": null,
+  "league_id": "1392685475625443328",
+  "metadata": {
+   "allow_pn": "on",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "978739257105756160"
+ },
+ {
+  "avatar": "a2729f91976e005f0f3fda2960c795ec",
+  "display_name": "ryanjpitcher",
+  "is_bot": false,
+  "is_owner": null,
+  "league_id": "1392685475625443328",
+  "metadata": {
+   "allow_pn": "on",
+   "mention_pn": "on"
+  },
+  "settings": null,
+  "user_id": "995434324843433984"
+ }
+]
