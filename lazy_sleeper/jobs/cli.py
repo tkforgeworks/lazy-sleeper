@@ -18,6 +18,7 @@ lazy benchmark fit-weights      # inverse-MAE blend weights → derived.ensemble
 lazy weights show|set|clear|config   # fitted vs manual-override blend weights (the λ switch)
 lazy score preview --source ensemble # blended projections with each member's column
 lazy board baselines            # replacement-level points per position (historical + live)
+lazy board vorp --top 30        # draft-pool VORP vs the live (or --baseline historical) baseline
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -952,6 +953,59 @@ def board_baselines(
     for pos in [p for p in ("QB", "RB", "WR", "TE", "K", "DEF") if p in live]:
         b = live[pos]
         typer.echo(f"{pos:<5}{b.cutoff_rank:>7}{b.points:>10.1f}{b.flex_fills:>12}")
+
+
+@board_app.command("vorp")
+def board_vorp(
+    season: int = typer.Option(2026, help="Season to rank"),
+    provider: str = typer.Option("ensemble", help="sleeper | espn | ensemble"),
+    baseline: str = typer.Option("live", help="live | historical"),
+    position: str | None = typer.Option(None, "--position", "-p", help="Filter one position"),
+    top: int = typer.Option(50, help="Rows to print"),
+) -> None:
+    """Draft-pool VORP: points − replacement baseline, flex demand baked into the baseline.
+
+    `live` measures against a baseline derived from the same projections (provider bias
+    cancels; the last starter per position sits at exactly 0). `historical` measures against
+    the 2023–25 actuals average instead.
+    """
+    from sqlalchemy import select
+
+    from lazy_sleeper.board import RosterShape, historical_baselines, live_vorp, vorp_board
+    from lazy_sleeper.db.models import Player
+    from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rules = load_league_rules(s, ctx.store)
+        shape = RosterShape.from_rules(rules)
+        prov = ctx.provider(s, provider)
+        if baseline == "live":
+            board = live_vorp(prov, shape, season)
+        elif baseline == "historical":
+            avg = historical_baselines(s, default_scorer(rules), shape).average
+            board = vorp_board(prov.projections(season), avg)
+        else:
+            raise typer.BadParameter("baseline must be live | historical")
+        if position:
+            board = [v for v in board if v.position == position.upper()]
+        rows = board[:top]
+        names = dict(
+            s.execute(
+                select(Player.sleeper_id, Player.full_name).where(
+                    Player.sleeper_id.in_({v.sleeper_id for v in rows})
+                )
+            ).all()
+        )
+    typer.echo(
+        f"{'rk':<4}{'pos':<5}{'team':<5}{'player':<26}{'pts':>8}{'base':>8}{'vorp':>8}{'pos_rk':>7}"
+    )
+    for i, v in enumerate(rows, start=1):
+        name = names.get(v.sleeper_id, v.sleeper_id)
+        typer.echo(
+            f"{i:<4}{v.position:<5}{v.team or '':<5}{name[:25]:<26}"
+            f"{v.points:>8.1f}{v.baseline:>8.1f}{v.vorp:>8.1f}{v.pos_rank:>7}"
+        )
 
 
 # --- sync ------------------------------------------------------------------
