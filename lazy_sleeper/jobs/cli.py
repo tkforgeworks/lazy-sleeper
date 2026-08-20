@@ -18,8 +18,8 @@ lazy benchmark fit-weights      # inverse-MAE blend weights → derived.ensemble
 lazy weights show|set|clear|config   # fitted vs manual-override blend weights (the λ switch)
 lazy score preview --source ensemble # blended projections with each member's column
 lazy board baselines            # replacement-level points per position (historical + live)
-lazy board vorp --top 30        # draft-pool VORP + tiers/cliffs vs the live baseline
-lazy board config               # show/update stored tier & cliff thresholds (draft-day dial)
+lazy board vorp --top 30        # the board: VORP, tiers/cliffs, ADP delta, disagreement flags
+lazy board config               # show/update stored tier/cliff/flag thresholds (draft-day dial)
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -964,13 +964,15 @@ def board_vorp(
     position: str | None = typer.Option(None, "--position", "-p", help="Filter one position"),
     top: int = typer.Option(50, help="Rows to print"),
     cliff_gap: float | None = typer.Option(None, help="Override the stored cliff threshold"),
+    flags_only: bool = typer.Option(False, help="Only rows with a value/reach or DISAGREE flag"),
 ) -> None:
-    """Draft-pool VORP with tier and cliff columns.
+    """The draft board: VORP with tier/cliff, ADP-delta and provider-disagreement columns.
 
     `live` measures against a baseline derived from the same projections (provider bias
     cancels; the last starter per position sits at exactly 0). `historical` measures against
-    the 2023–25 actuals average instead. Tier/cliff thresholds come from `derived.board_config`
-    (adjust via `lazy board config` or `PUT /board/config`).
+    the 2023–25 actuals average instead. `Δadp` = Sleeper ADP − board rank (+ = value, − =
+    reach); `spread` = Sleeper-vs-ESPN league-scored gap, position-debiased by default. All
+    thresholds come from `derived.board_config` (`lazy board config` / `PUT /board/config`).
     """
     from dataclasses import replace
 
@@ -979,10 +981,9 @@ def board_vorp(
     from lazy_sleeper.board import (
         BoardConfigRepository,
         RosterShape,
-        assign_tiers,
+        build_board,
         historical_baselines,
-        live_vorp,
-        vorp_board,
+        latest_adp,
     )
     from lazy_sleeper.db.models import Player
     from lazy_sleeper.scoring import default_scorer, load_league_rules
@@ -993,18 +994,19 @@ def board_vorp(
         shape = RosterShape.from_rules(rules)
         prov = ctx.provider(s, provider)
         if baseline == "live":
-            values = live_vorp(prov, shape, season)
+            baselines = None
         elif baseline == "historical":
-            avg = historical_baselines(s, default_scorer(rules), shape).average
-            values = vorp_board(prov.projections(season), avg)
+            baselines = historical_baselines(s, default_scorer(rules), shape).average
         else:
             raise typer.BadParameter("baseline must be live | historical")
         config = BoardConfigRepository(s).get()
         if cliff_gap is not None:
             config = replace(config, cliff_gap=cliff_gap)
-        board = assign_tiers(values, config)
+        board = build_board(prov, shape, season, config, latest_adp(s, season), baselines=baselines)
         if position:
             board = [r for r in board if r.value.position == position.upper()]
+        if flags_only:
+            board = [r for r in board if r.adp_flag or r.disagree]
         rows = board[:top]
         names = dict(
             s.execute(
@@ -1015,17 +1017,29 @@ def board_vorp(
         )
     typer.echo(
         f"{'rk':<4}{'pos':<5}{'team':<5}{'player':<26}{'pts':>8}{'base':>8}{'vorp':>8}"
-        f"{'pos_rk':>7}{'tier':>6}{'gap':>7}  cliff"
+        f"{'pos_rk':>7}{'tier':>6}{'gap':>7}{'adp':>7}{'dadp':>7}{'spread':>8}  flags"
     )
     for i, r in enumerate(rows, start=1):
         v = r.value
         name = names.get(v.sleeper_id, v.sleeper_id)
         tier = str(r.tier) if r.tier is not None else "-"
         gap = f"{r.gap_to_next:.1f}" if r.gap_to_next is not None else "-"
+        adp = f"{r.adp:.1f}" if r.adp is not None else "-"
+        delta = f"{r.adp_delta:+.0f}" if r.adp_delta is not None else "-"
+        spread = f"{r.spread:.1f}" if r.spread is not None else "-"
+        flags = " ".join(
+            f
+            for f in (
+                "CLIFF" if r.cliff else "",
+                r.adp_flag or "",
+                "DISAGREE" if r.disagree else "",
+            )
+            if f
+        )
         typer.echo(
             f"{i:<4}{v.position:<5}{v.team or '':<5}{name[:25]:<26}"
             f"{v.points:>8.1f}{v.baseline:>8.1f}{v.vorp:>8.1f}{v.pos_rank:>7}"
-            f"{tier:>6}{gap:>7}  {'CLIFF' if r.cliff else ''}"
+            f"{tier:>6}{gap:>7}{adp:>7}{delta:>7}{spread:>8}  {flags}"
         )
 
 
@@ -1034,20 +1048,39 @@ def board_config_cmd(
     cliff_gap: float | None = typer.Option(None, help="Season-points drop → cliff flag"),
     gap_multiplier: float | None = typer.Option(None, help="Tier break at × median gap"),
     min_gap: float | None = typer.Option(None, help="Tier-break floor in season points"),
+    adp_min_delta: float | None = typer.Option(None, help="ADP-delta flag floor in picks"),
+    adp_pct: float | None = typer.Option(None, help="ADP-delta flag as a fraction of ADP"),
+    disagree_min_pts: float | None = typer.Option(None, help="Disagreement floor, season pts"),
+    disagree_pct: float | None = typer.Option(None, help="Disagreement as a fraction of points"),
+    debias: bool | None = typer.Option(
+        None, "--debias/--no-debias", help="Remove position-level provider bias before comparing"
+    ),
 ) -> None:
-    """Show (no options) or update the stored tier/cliff thresholds."""
+    """Show (no options) or update the stored tier/cliff/flag thresholds."""
     from lazy_sleeper.board import BoardConfigRepository
 
     ctx = _Ctx()
     with session_scope(ctx.sessions) as s:
         repo = BoardConfigRepository(s)
         try:
-            cfg = repo.set(cliff_gap=cliff_gap, gap_multiplier=gap_multiplier, min_gap=min_gap)
+            cfg = repo.set(
+                cliff_gap=cliff_gap,
+                gap_multiplier=gap_multiplier,
+                min_gap=min_gap,
+                adp_min_delta=adp_min_delta,
+                adp_pct=adp_pct,
+                disagree_min_pts=disagree_min_pts,
+                disagree_pct=disagree_pct,
+                debias_disagreement=debias,
+            )
         except ValueError as e:
             raise typer.BadParameter(str(e)) from e
     typer.echo(
         f"cliff_gap={cfg.cliff_gap:g}  gap_multiplier={cfg.gap_multiplier:g}  "
-        f"min_gap={cfg.min_gap:g}"
+        f"min_gap={cfg.min_gap:g}\n"
+        f"adp_min_delta={cfg.adp_min_delta:g}  adp_pct={cfg.adp_pct:g}\n"
+        f"disagree_min_pts={cfg.disagree_min_pts:g}  disagree_pct={cfg.disagree_pct:g}  "
+        f"debias_disagreement={cfg.debias_disagreement}"
     )
 
 

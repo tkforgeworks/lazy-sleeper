@@ -35,6 +35,12 @@ class TierConfig:
     gap_multiplier: float = 2.0  # tier break at this multiple of the position's median gap
     min_gap: float = 4.0  # ...but never on a drop smaller than this
     depth: Mapping[str, int] = field(default_factory=lambda: dict(DEFAULT_POOL_SIZES))
+    # LS-29 market/disagreement flags (see board/flags.py); stored in derived.board_config too.
+    adp_min_delta: float = 12.0  # picks: |ADP − board rank| floor for a value/reach flag
+    adp_pct: float = 0.25  # ...or this fraction of the ADP, whichever is larger
+    disagree_min_pts: float = 20.0  # season pts: member spread floor for a disagreement flag
+    disagree_pct: float = 0.15  # ...or this fraction of the blended points, whichever is larger
+    debias_disagreement: bool = True  # remove each member's position-level bias before comparing
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,12 @@ class BoardRow:
     tier: int | None  # None past the position's tiered depth
     cliff: bool
     gap_to_next: float | None  # points down to the next player at the position (None = last)
+    # LS-29 — filled by board/flags.py; None/False until those passes run.
+    adp: float | None = None  # Sleeper adp_ppr (overall pick)
+    adp_delta: float | None = None  # adp − board rank: + = market drafts him later than we rank
+    adp_flag: str | None = None  # "value" | "reach" | None
+    spread: float | None = None  # |sleeper − espn| league-scored points (debiased if configured)
+    disagree: bool = False
 
 
 def assign_tiers(values: Sequence[PlayerValue], config: TierConfig | None = None) -> list[BoardRow]:

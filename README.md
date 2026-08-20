@@ -12,9 +12,9 @@ FastAPI surface. The Flutter client lives in a separate repo (`lazy-sleeper-app`
 **M0–M2 done (2026-08-19):** ingestion + immutable snapshot archive, league scoring engine (QB–DEF, parity
 vs nflverse), season + weekly provider benchmarks, provider abstraction + fitted ensemble weights, and the
 ops floor — shared Supabase Postgres (cut over 2026-08-19), archive mirrored to Supabase Storage, daily
-pull running from GitHub Actions. **M3 board core done (2026-08-19):** replacement baselines, flex-aware
-VORP, tiers + cliff flags (`lazy board …`, see "Draft board" below). Remaining for M3: LS-29 (ADP delta +
-disagreement flags) and LS-30 (`/board` + daily regen). See
+pull running from GitHub Actions. **M3 board logic done (2026-08-20):** replacement baselines, flex-aware
+VORP, tiers + cliff flags, ADP-delta + provider-disagreement flags (`lazy board …`, see "Draft board"
+below). Remaining for M3: LS-30 (`/board` + daily regen). See
 [`docs/execution-plan-analysis_20260816.md`](docs/execution-plan-analysis_20260816.md) for the milestone plan
 and [`docs/draft-companion-execution-plan_20260816.md`](docs/draft-companion-execution-plan_20260816.md) for
 the product/architecture spec.
@@ -137,8 +137,8 @@ lazy score parity                                        # engine vs nflverse PP
 lazy benchmark season / weekly                           # Sleeper/ESPN/naive vs 2024–25 actuals → data/benchmarks/
 lazy benchmark fit-weights && lazy weights show          # inverse-MAE blend weights → derived.ensemble_weights
 lazy board baselines                                     # replacement level per position (2023–25 avg + live)
-lazy board vorp --top 30                                 # the draft board: VORP + tier + gap + CLIFF columns
-lazy board config --cliff-gap 12                         # draft-day dial: stored tier/cliff thresholds
+lazy board vorp --top 30                                 # the draft board: VORP, tier/CLIFF, ADP delta, disagreement
+lazy board config --cliff-gap 12                         # draft-day dial: stored tier/cliff/flag thresholds
 lazy check freshness && lazy check joins                 # data-quality audit (see below)
 lazy check player "ja'marr chase" -t CIN                 # one-player dossier: ids, projections vs ours, actuals
 uvicorn lazy_sleeper.api.app:app --reload              # http://127.0.0.1:8000/docs
@@ -268,7 +268,8 @@ vintage in `core.projections`, scored under league rules) and `EnsembleProvider(
 
 ## Draft board (E5)
 
-The board is three layers in `board/`, each pure functions over the previous one (LS-26/27/28):
+The board is four layers in `board/`, each pure functions over the previous one (LS-26/27/28/29);
+`build_board(...)` runs them end to end:
 
 1. **Replacement baselines** (`board/baselines.py`) — replacement level = the points of the *last starter*
    per position. Cutoffs are derived from the league payload (`total_rosters` × dedicated slots), and the
@@ -285,15 +286,27 @@ The board is three layers in `board/`, each pure functions over the previous one
    drop between consecutive players ≥ `max(min_gap, gap_multiplier × the position's median gap)` over its
    draftable depth. The **CLIFF** flag is absolute and independent: drop to the next player at the position
    ≥ `cliff_gap` season points (default 15 ≈ 1 pt/week) — "last chair before the music stops".
+4. **Market + disagreement flags** (`board/flags.py`) — two signals beside VORP, not inside it.
+   **ADP delta** = Sleeper `adp_ppr` (latest 2026 `core.adp` snapshot) − overall board rank: `+` means the
+   room lets him fall past where we rank him (**value**), `−` means his ADP is a **reach** by our numbers.
+   The flag fires at `|Δ| ≥ max(adp_min_delta, adp_pct × ADP)` (12 picks / 25%) so a 10-pick gap at pick 6
+   counts and at pick 150 doesn't. **Disagreement** = the spread between the ensemble members' league-scored
+   points on the same player (`components`), flagged at `≥ max(disagree_min_pts, disagree_pct × points)`
+   (20 pts / 15%). Sleeper and ESPN carry *systematic* position offsets (Sleeper DEF ~20% low — no
+   points-allowed data), so by default each member is rescaled by its position-median ratio to the blend
+   first (`debias_disagreement`); with it off, 27 of 32 DEFs flag, with it on only the genuine splits do.
+   Known read: K/DEF show `value` across the board because the market deliberately drafts them 50–100
+   picks after their VORP rank — read the ADP flag on those positions as "when the run starts", not value.
 
-Thresholds live in `derived.board_config` (one row, seeded by migration 0006) so they're adjustable
-mid-draft without a deploy: `lazy board config --cliff-gap 12 --gap-multiplier 3`, or from the app via
-`GET /board/config` / `PUT /board/config` (partial updates). `lazy board vorp --cliff-gap 20` overrides
-for one run without touching the stored values.
+Thresholds live in `derived.board_config` (one row, seeded by migrations 0006/0007) so they're adjustable
+mid-draft without a deploy: `lazy board config --cliff-gap 12 --disagree-min-pts 30 --no-debias`, or from
+the app via `GET /board/config` / `PUT /board/config` (partial updates). `lazy board vorp --cliff-gap 20`
+overrides for one run without touching the stored values.
 
 ```bash
 lazy board baselines                        # both baseline tables, cutoffs + flex fills shown
-lazy board vorp --top 30                    # full board: pts / base / vorp / pos_rk / tier / gap / CLIFF
+lazy board vorp --top 30                    # full board: … tier / gap / adp / dadp / spread / flags
+lazy board vorp --flags-only --top 40       # just the value / reach / DISAGREE rows
 lazy board vorp -p RB --baseline historical # one position, actuals-average baseline
 lazy board config                           # show stored thresholds (no options = read-only)
 ```
