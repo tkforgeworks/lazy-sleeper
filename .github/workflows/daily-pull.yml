@@ -58,3 +58,11 @@ jobs:
         run: uv run lazy load players && uv run lazy load crosswalk && uv run lazy load stats
       - name: Freshness audit
         run: uv run lazy check freshness
+      - name: Regenerate the draft board (derived.boards + CSV/HTML)
+        run: uv run lazy board regen --season "${{ inputs.season || '2026' }}"
+      - name: Upload board exports
+        uses: actions/upload-artifact@v4
+        with:
+          name: board-${{ github.run_id }}
+          path: data/boards/board_latest.*
+          retention-days: 14

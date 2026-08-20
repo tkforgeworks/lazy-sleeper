@@ -20,6 +20,7 @@ lazy score preview --source ensemble # blended projections with each member's co
 lazy board baselines            # replacement-level points per position (historical + live)
 lazy board vorp --top 30        # the board: VORP, tiers/cliffs, ADP delta, disagreement flags
 lazy board config               # show/update stored tier/cliff/flag thresholds (draft-day dial)
+lazy board regen                # persist a dated board (derived.boards) + CSV/HTML in data/boards/
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -44,7 +45,7 @@ from lazy_sleeper.ingest.snapshots import (
     SnapshotKey,
     SnapshotRepository,
     SnapshotStore,
-    SupabaseStorage,
+    store_from_settings,
 )
 from lazy_sleeper.ingest.stat_loaders import (
     STAT_KINDS,
@@ -72,14 +73,7 @@ def _root(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 
 
 def _store(settings: Settings) -> SnapshotStore:
-    remote = None
-    if settings.supabase_enabled:
-        remote = SupabaseStorage(
-            settings.supabase_url or "",
-            settings.supabase_secret_key or "",
-            settings.supabase_bucket,
-        )
-    return SnapshotStore(settings.snapshot_dir, remote)
+    return store_from_settings(settings)
 
 
 class _Ctx:
@@ -112,24 +106,12 @@ class _Ctx:
 
     def provider(self, session, name: str):  # noqa: ANN001, ANN201
         """`sleeper` | `espn` | `ensemble` — league-scored projections from stored vintages."""
-        from lazy_sleeper.providers import (
-            EnsembleProvider,
-            EspnProvider,
-            SleeperProvider,
-            WeightRepository,
-        )
+        from lazy_sleeper.providers import make_provider
 
-        scorer = self.scorer(session)
-        if name == "sleeper":
-            return SleeperProvider(session, scorer)
-        if name == "espn":
-            return EspnProvider(session, scorer)
-        if name == "ensemble":
-            return EnsembleProvider(
-                [SleeperProvider(session, scorer), EspnProvider(session, scorer)],
-                WeightRepository(session),
-            )
-        raise typer.BadParameter(f"unknown provider {name!r} (sleeper | espn | ensemble)")
+        try:
+            return make_provider(session, self.scorer(session), name)
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
 
 
 # --- pull ------------------------------------------------------------------
@@ -1081,6 +1063,53 @@ def board_config_cmd(
         f"adp_min_delta={cfg.adp_min_delta:g}  adp_pct={cfg.adp_pct:g}\n"
         f"disagree_min_pts={cfg.disagree_min_pts:g}  disagree_pct={cfg.disagree_pct:g}  "
         f"debias_disagreement={cfg.debias_disagreement}"
+    )
+
+
+BOARDS_DIR = Path("data/boards")
+
+
+@board_app.command("regen")
+def board_regen(
+    season: int = typer.Option(2026, help="Season to rank"),
+    provider: str = typer.Option("ensemble", help="sleeper | espn | ensemble"),
+    baseline: str = typer.Option("live", help="live | historical"),
+    out: Annotated[Path, typer.Option(help="Directory for the CSV + HTML exports")] = BOARDS_DIR,
+) -> None:
+    """Regenerate the board from what's in core.* and persist it as a new dated board.
+
+    Writes `derived.boards` + `derived.board_rows` (what `GET /board` serves) and
+    `<out>/board_<season>_<provider>_<UTC stamp>.{csv,html}` plus `board_latest.{csv,html}`.
+    Runs after the daily pull in CI; safe to re-run any time (every run is a new board).
+    """
+    from lazy_sleeper.board import board_meta, regenerate, to_csv, to_html
+    from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        rules = load_league_rules(s, ctx.store)
+        try:
+            board, rows = regenerate(
+                s,
+                ctx.provider(s, provider),
+                rules,
+                default_scorer(rules),
+                season,
+                baseline=baseline,
+            )
+        except ValueError as e:
+            raise typer.BadParameter(str(e)) from e
+        meta = board_meta(board)
+    out.mkdir(parents=True, exist_ok=True)
+    stamp = meta["generated_at"].strftime("%Y%m%dT%H%M%SZ")
+    csv_text, html_text = to_csv(rows), to_html(meta, rows)
+    for stem in (f"board_{season}_{provider}_{stamp}", "board_latest"):
+        (out / f"{stem}.csv").write_text(csv_text, encoding="utf-8")
+        (out / f"{stem}.html").write_text(html_text, encoding="utf-8")
+    flagged = sum(1 for r in rows if r["adp_flag"] or r["disagree"])
+    typer.echo(
+        f"board #{meta['id']} {season} {provider}/{baseline}: {len(rows)} rows, "
+        f"{flagged} flagged, {sum(1 for r in rows if r['cliff'])} cliffs -> {out}/board_latest.*"
     )
 
 

@@ -106,6 +106,18 @@ class SupabaseStorage:
         return self._bucket
 
 
+def store_from_settings(settings) -> SnapshotStore:  # noqa: ANN001 — Settings (avoid import cycle)
+    """Local archive + Supabase Storage mirror when the secrets are configured."""
+    remote = None
+    if settings.supabase_enabled:
+        remote = SupabaseStorage(
+            settings.supabase_url or "",
+            settings.supabase_secret_key or "",
+            settings.supabase_bucket,
+        )
+    return SnapshotStore(settings.snapshot_dir, remote)
+
+
 class SnapshotStore:
     def __init__(self, root: Path, remote: RemoteStorage | None = None) -> None:
         self._root = root

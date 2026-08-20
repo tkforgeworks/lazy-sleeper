@@ -1,12 +1,14 @@
-"""FastAPI application. M0: health + snapshot inventory; LS-25: ensemble weights switchboard.
-Board/draft endpoints arrive in M3/M4."""
+"""FastAPI application. M0: health + snapshot inventory; LS-25: ensemble weights switchboard;
+LS-28/29 board config; LS-30 `/board` (latest persisted board), `/board.html`, `POST /board/regen`.
+Draft endpoints arrive in M4."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,7 +16,16 @@ from sqlalchemy.orm import Session
 from lazy_sleeper.config import Settings, get_settings
 from lazy_sleeper.db.models import Snapshot
 from lazy_sleeper.db.session import make_engine, make_session_factory
-from lazy_sleeper.providers import SEASON, WEEKLY, WeightRepository
+from lazy_sleeper.ingest.snapshots import store_from_settings
+from lazy_sleeper.providers import SEASON, WEEKLY, WeightRepository, make_provider
+
+DEFAULT_SEASON = 2026
+
+
+class RegenBody(BaseModel):
+    season: int = DEFAULT_SEASON
+    provider: str = Field("ensemble", pattern="^(sleeper|espn|ensemble)$")
+    baseline: str = Field("live", pattern="^(live|historical)$")
 
 
 class OverrideBody(BaseModel):
@@ -67,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     engine = make_engine(settings)
     sessions = make_session_factory(engine)
+    store = store_from_settings(settings)
 
     def get_session() -> Iterator[Session]:
         s = sessions()
@@ -178,6 +190,65 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         repo.set(**body.model_dump())
         session.commit()
         return repo.as_dict()
+
+    def _latest_board(session: Session, season: int, provider: str):  # noqa: ANN202
+        from lazy_sleeper.board import BoardRepository
+
+        repo = BoardRepository(session)
+        board = repo.latest(season, provider)
+        if board is None:
+            raise HTTPException(404, f"no board for {season} yet — run `lazy board regen`")
+        return repo, board
+
+    @app.get("/board")
+    def board(
+        season: int = DEFAULT_SEASON,
+        provider: str = Query("ensemble", pattern="^(sleeper|espn|ensemble)$"),
+        position: str | None = Query(None, min_length=1, max_length=8),
+        limit: int | None = Query(None, ge=1, le=1000),
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """The latest persisted board: ranked rows with points, VORP, tier/cliff, ADP delta,
+        disagreement spread/flag and injury status. `position` filters; `rank` stays overall."""
+        from lazy_sleeper.board import board_meta
+
+        repo, b = _latest_board(session, season, provider)
+        return {"board": board_meta(b), "rows": repo.rows(b.id, position, limit)}
+
+    @app.get("/board.html", response_class=HTMLResponse)
+    def board_html(
+        season: int = DEFAULT_SEASON,
+        provider: str = Query("ensemble", pattern="^(sleeper|espn|ensemble)$"),
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> str:
+        """Self-contained HTML view of the latest board — the draft-night fallback."""
+        from lazy_sleeper.board import board_meta, to_html
+
+        repo, b = _latest_board(session, season, provider)
+        return to_html(board_meta(b), repo.rows(b.id))
+
+    @app.post("/board/regen")
+    def board_regen(
+        body: RegenBody,
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Rebuild the board from core.* under the current config and persist it — on-demand
+        regen, so a `PUT /board/config` change shows up without waiting for the daily job."""
+        from lazy_sleeper.board import board_meta, regenerate
+        from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+        rules = load_league_rules(session, store)
+        scorer = default_scorer(rules)
+        b, rows = regenerate(
+            session,
+            make_provider(session, scorer, body.provider),
+            rules,
+            scorer,
+            body.season,
+            baseline=body.baseline,
+        )
+        session.commit()
+        return {"board": board_meta(b), "rows": len(rows)}
 
     return app
 

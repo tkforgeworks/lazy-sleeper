@@ -20,6 +20,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -336,3 +337,53 @@ class BoardConfig(Base):
     disagree_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.15)
     debias_disagreement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Board(Base):
+    """One generated draft board (LS-30): a dated, immutable run of vorp -> tiers -> flags."""
+
+    __tablename__ = "boards"
+    __table_args__ = ({"schema": "derived"},)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    season: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)  # sleeper | espn | ensemble
+    baseline: Mapped[str] = mapped_column(String(16), nullable=False)  # live | historical
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)  # TierConfig in force
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class BoardEntry(Base):
+    """One ranked row of a generated board — BoardRow flattened plus player identity/injury."""
+
+    __tablename__ = "board_rows"
+    __table_args__ = (
+        UniqueConstraint("board_id", "rank", name="uq_board_rows_rank"),
+        Index("ix_board_rows_board_position", "board_id", "position"),
+        {"schema": "derived"},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    board_id: Mapped[int] = mapped_column(
+        ForeignKey("derived.boards.id", ondelete="CASCADE"), nullable=False
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    sleeper_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(128))
+    position: Mapped[str] = mapped_column(String(8), nullable=False)
+    team: Mapped[str | None] = mapped_column(String(8))
+    injury_status: Mapped[str | None] = mapped_column(String(32))
+    points: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline: Mapped[float] = mapped_column(Float, nullable=False)
+    vorp: Mapped[float] = mapped_column(Float, nullable=False)
+    pos_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    tier: Mapped[int | None] = mapped_column(Integer)
+    cliff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    gap_to_next: Mapped[float | None] = mapped_column(Float)
+    adp: Mapped[float | None] = mapped_column(Float)
+    adp_delta: Mapped[float | None] = mapped_column(Float)
+    adp_flag: Mapped[str | None] = mapped_column(String(8))
+    spread: Mapped[float | None] = mapped_column(Float)
+    disagree: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    components: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

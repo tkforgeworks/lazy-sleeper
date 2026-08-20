@@ -7,17 +7,26 @@ Keep this file in sync as decisions land.
 ## Deadline & milestones
 
 Live draft **Fri 2026-09-04 8 PM ET**. Milestones (full detail in `docs/execution-plan-analysis_20260816.md` §2/§7):
-M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benchmark scoreboard → M3 consensus
-draft board → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
+M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benchmark scoreboard ✅ (2026-08-19) →
+M3 consensus draft board ✅ (2026-08-20) → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
 Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-20 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29 (PRs #1–#19).
-  186 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 board logic done 2026-08-20**
-  (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags, all in `board/`); LS-30 remains.
-- **Next up, in order:** LS-30 (`/board` + `lazy board regen` — render `build_board(...)` rows; the
-  JSON shape is `BoardRow` flattened). Then M4 = LS-16 → LS-31–38.
+- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
+  #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
+  (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
+- **Next up:** M4 = LS-16 (draft picks/rosters → core) → LS-31–38 (live draft companion).
+- **Board serving (LS-30, `board/store.py` + `board/render.py`, migration 0008):** `regenerate(session,
+  provider, rules, scorer, season, baseline=)` = `build_board` + `core.players` name/injury join →
+  `derived.boards` (dated, immutable, `config` JSONB snapshot) + `derived.board_rows` (flattened
+  `BoardRow`, `ROW_FIELDS`). `BoardRepository.latest(season, provider)` / `.rows(board_id, position,
+  limit)`. API: `GET /board` (provider default `ensemble`, 404 until first regen), `GET /board.html`
+  (`to_html`, self-contained, draft-night fallback), `POST /board/regen`. CLI `lazy board regen` also
+  writes `data/boards/board_<season>_<provider>_<stamp>.{csv,html}` + `board_latest.*` (gitignored;
+  uploaded as a 14-day artifact by `daily-pull.yml`, which runs regen after freshness). Provider
+  names resolve in one place: `providers.make_provider(session, scorer, name)`; `_Ctx.provider` and
+  the API both use it. `ingest.snapshots.store_from_settings(settings)` builds the SnapshotStore.
 - **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
   STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
   latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
