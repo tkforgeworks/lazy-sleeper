@@ -4,7 +4,8 @@ lazy pull daily                 # players + 2026 season projections + ESPN 2026 
 lazy pull projections 2025 --week 3
 lazy pull espn 2026
 lazy pull league --load         # league, users, rosters, draft, draft picks (+ load into core.*)
-lazy pull picks --load          # just draft picks (draft-night poll target; --draft-id <mock>)
+lazy pull picks --load          # just draft picks, one shot (--draft-id <mock>)
+lazy draft poll                 # draft-night poller: snapshot+sync picks every 5 s, print new picks
 lazy pull nflverse 2025         # weekly stats + snap counts
 lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
 lazy load players               # latest valid players snapshot → core.players
@@ -62,6 +63,8 @@ db_app = typer.Typer(no_args_is_help=True)
 app.add_typer(pull_app, name="pull", help="Fetch external data into dated snapshots")
 app.add_typer(load_app, name="load", help="Load latest snapshots into core tables")
 app.add_typer(db_app, name="db", help="Database migrations")
+draft_app = typer.Typer(no_args_is_help=True)
+app.add_typer(draft_app, name="draft", help="Live draft companion (M4)")
 
 
 @app.callback()
@@ -1219,3 +1222,80 @@ def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
     ctx = _Ctx()
     with session_scope(ctx.sessions) as s:
         _sync_report("pull", Syncer(s, ctx.store).pull(dry_run=dry_run))
+
+
+# --- draft (M4) ------------------------------------------------------------
+
+
+@draft_app.command("poll")
+def draft_poll(
+    draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
+    interval: float = typer.Option(5.0, help="Seconds between polls"),
+    max_backoff: float = typer.Option(60.0, help="Cap on the error backoff, seconds"),
+    once: bool = typer.Option(False, help="Poll a single time and exit"),
+    forever: bool = typer.Option(False, help="Keep polling after the draft reports complete"),
+) -> None:
+    """Poll /draft/{id}/picks until the draft completes (LS-31). Every poll is snapshotted;
+    core.draft_picks is synced; each new pick is printed as it lands. Ctrl-C stops cleanly."""
+    import signal
+    import threading
+
+    from sqlalchemy import select
+
+    from lazy_sleeper.db.models import Player
+    from lazy_sleeper.draft.poller import DbPickSink, DraftPoller, PickEvent, SleeperPickSource
+
+    ctx = _Ctx()
+    did = draft_id or ctx.settings.sleeper_draft_id
+    me = ctx.settings.sleeper_user_id
+    source = SleeperPickSource(ctx.sessions, ctx.puller, SleeperClient(ctx.http), did)
+    poller = DraftPoller(
+        source, DbPickSink(ctx.sessions, did), did, interval_s=interval, max_backoff_s=max_backoff
+    )
+    stop = threading.Event()
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    names: dict[str, str] = {}
+
+    def name_of(sleeper_id: str | None, meta: dict | None) -> str:
+        if sleeper_id and sleeper_id not in names:
+            with session_scope(ctx.sessions) as s:
+                row = s.execute(
+                    select(Player.full_name, Player.position, Player.team).where(
+                        Player.sleeper_id == sleeper_id
+                    )
+                ).first()
+            if row:
+                names[sleeper_id] = f"{row[0]} {row[1]}/{row[2]}"
+        if sleeper_id in names:
+            return names[sleeper_id]
+        m = meta or {}
+        return f"{m.get('first_name', '?')} {m.get('last_name', '')} {m.get('position', '?')}"
+
+    def on_pick(ev: PickEvent) -> None:
+        tag = " <-- you" if poller.my_slot(me) == ev.draft_slot else ""
+        auto = " (auto)" if ev.picked_by is None else ""
+        who = name_of(ev.sleeper_id, ev.metadata)
+        typer.echo(f"#{ev.pick_no:3d} R{ev.round}.{ev.draft_slot:<2d} {who}{auto}{tag}")
+
+    def on_poll(r) -> None:  # noqa: ANN001
+        if r.unchanged or r.new:
+            return
+        typer.echo(f"poll {r.poll_seq}: {r.picks} picks, {r.removed} removed, status {r.status}")
+
+    slot = poller.my_slot(me)
+    typer.echo(f"polling draft {did} every {interval:g}s (my slot: {slot or 'unknown yet'})")
+    summary = poller.run(
+        on_pick,
+        on_poll=on_poll,
+        stop=stop,
+        until_complete=not forever,
+        max_polls=1 if once else None,
+    )
+    exp = poller.expected_picks
+    typer.echo(
+        f"done: {summary.polls} polls, {summary.events} new picks, {summary.failures} failures, "
+        f"status {poller.status}"
+        + (f" ({exp} expected)" if exp else "")
+        + (" [stopped]" if summary.stopped else "")
+    )
