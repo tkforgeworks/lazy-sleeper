@@ -41,7 +41,22 @@ def _poller(fx: ReplayFixture, source, **kw) -> tuple[DraftPoller, MemorySink, l
 def test_fixture_is_the_recorded_rehearsal(fx: ReplayFixture) -> None:
     assert fx.draft_id == "1396298350046760960"
     assert len(fx.picks) == 180
-    assert [p["count"] for p in fx.polls] == [40, 40, 58, 64, 79, 88, 103, 118, 136, 153, 168, 180, 180, 180]
+    assert [p["count"] for p in fx.polls] == [
+        40,
+        40,
+        58,
+        64,
+        79,
+        88,
+        103,
+        118,
+        136,
+        153,
+        168,
+        180,
+        180,
+        180,
+    ]
     assert fx.draft["status"] == "complete"
     assert fx.draft["draft_order"] == {"1268591266036203520": 8}
 
