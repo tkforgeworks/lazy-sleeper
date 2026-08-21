@@ -5,7 +5,8 @@ lazy pull projections 2025 --week 3
 lazy pull espn 2026
 lazy pull league --load         # league, users, rosters, draft, draft picks (+ load into core.*)
 lazy pull picks --load          # just draft picks, one shot (--draft-id <mock>)
-lazy draft poll                 # draft-night poller: snapshot+sync picks every 5 s, print new picks
+lazy draft poll --advise        # draft-night poller: new picks + my top picks when on the clock
+lazy draft advise               # one-shot: who should I take now (survival / run / pick_score)
 lazy pull nflverse 2025         # weekly stats + snap counts
 lazy backfill data_pulls/ff-projections-2026-08-16 --pulled-at 2026-08-16
 lazy load players               # latest valid players snapshot → core.players
@@ -1106,8 +1107,17 @@ def board_config_cmd(
     debias: bool | None = typer.Option(
         None, "--debias/--no-debias", help="Remove position-level provider bias before comparing"
     ),
+    survival_sigma_min: float | None = typer.Option(None, help="ADP scatter floor, picks (LS-33)"),
+    survival_sigma_pct: float | None = typer.Option(None, help="ADP scatter as a fraction of ADP"),
+    demand_shift: float | None = typer.Option(None, help="Window stretch per unit relative demand"),
+    need_bonus: float | None = typer.Option(None, help="pick_score points per unit of my need"),
+    run_window: int | None = typer.Option(None, help="Picks looked back for a run"),
+    run_threshold: int | None = typer.Option(None, help="Run when this many in the window"),
+    run_streak: int | None = typer.Option(None, help="...or this many consecutive"),
+    stream_depth: int | None = typer.Option(None, help="K/DEF baseline rank (0 = last starter)"),
+    late_rounds: int | None = typer.Option(None, help="K/DEF need bonus only in last N rounds"),
 ) -> None:
-    """Show (no options) or update the stored tier/cliff/flag thresholds."""
+    """Show (no options) or update the stored tier/cliff/flag/draft-signal thresholds."""
     from lazy_sleeper.board import BoardConfigRepository
 
     ctx = _Ctx()
@@ -1123,6 +1133,15 @@ def board_config_cmd(
                 disagree_min_pts=disagree_min_pts,
                 disagree_pct=disagree_pct,
                 debias_disagreement=debias,
+                survival_sigma_min=survival_sigma_min,
+                survival_sigma_pct=survival_sigma_pct,
+                demand_shift=demand_shift,
+                need_bonus=need_bonus,
+                run_window=run_window,
+                run_threshold=run_threshold,
+                run_streak=run_streak,
+                stream_depth=stream_depth,
+                late_rounds=late_rounds,
             )
         except ValueError as e:
             raise typer.BadParameter(str(e)) from e
@@ -1131,7 +1150,13 @@ def board_config_cmd(
         f"min_gap={cfg.min_gap:g}\n"
         f"adp_min_delta={cfg.adp_min_delta:g}  adp_pct={cfg.adp_pct:g}\n"
         f"disagree_min_pts={cfg.disagree_min_pts:g}  disagree_pct={cfg.disagree_pct:g}  "
-        f"debias_disagreement={cfg.debias_disagreement}"
+        f"debias_disagreement={cfg.debias_disagreement}\n"
+        f"survival_sigma_min={cfg.survival_sigma_min:g}  "
+        f"survival_sigma_pct={cfg.survival_sigma_pct:g}  "
+        f"demand_shift={cfg.demand_shift:g}  need_bonus={cfg.need_bonus:g}\n"
+        f"run_window={cfg.run_window}  run_threshold={cfg.run_threshold}  "
+        f"run_streak={cfg.run_streak}\n"
+        f"stream_depth={cfg.stream_depth}  late_rounds={cfg.late_rounds}"
     )
 
 
@@ -1227,6 +1252,135 @@ def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
 # --- draft (M4) ------------------------------------------------------------
 
 
+class _Adviser:
+    """Pre-draft board built once; draft state rebuilt from core.draft_picks on each refresh."""
+
+    def __init__(self, ctx: _Ctx, draft_id: str, season: int, top: int) -> None:
+        from sqlalchemy import select
+
+        from lazy_sleeper.board import BoardConfigRepository, RosterShape, build_board, latest_adp
+        from lazy_sleeper.db.models import Player
+        from lazy_sleeper.draft.signals import SearchRankAdp
+        from lazy_sleeper.draft.state import DraftSpec
+        from lazy_sleeper.scoring import load_league_rules
+
+        self._ctx, self._draft_id, self._top = ctx, draft_id, top
+        with session_scope(ctx.sessions) as s:
+            rules = load_league_rules(s, ctx.store)
+            self._cfg = BoardConfigRepository(s).get()
+            self._rows = build_board(
+                ctx.provider(s, "ensemble"), RosterShape.from_rules(rules), season, self._cfg,
+                latest_adp(s, season),
+            )  # fmt: skip
+            self._adp = latest_adp(s, season)
+            players = s.execute(
+                select(Player.sleeper_id, Player.full_name, Player.position, Player.team,
+                       Player.search_rank)
+            ).all()  # fmt: skip
+        self._names = {p[0]: f"{p[1]} {p[2]}/{p[3]}" for p in players}
+        self._positions = {p[0]: p[2] for p in players}
+        self._search_rank = {p[0]: p[4] for p in players if p[4] is not None}
+        self._rank_map = SearchRankAdp(
+            (self._search_rank[sid], adp)
+            for sid, adp in self._adp.items()
+            if sid in self._search_rank
+        )
+        self._spec_rules = rules
+        self._spec = DraftSpec.build(rules)
+        self.state = None
+        self.refresh(None)
+
+    def refresh(self, draft_doc: dict | None) -> None:
+        from sqlalchemy import select
+
+        from lazy_sleeper.db.models import Draft, DraftPick
+        from lazy_sleeper.draft.state import DraftSpec, DraftState, resolve_my_slot
+
+        with session_scope(self._ctx.sessions) as s:
+            row = s.get(Draft, self._draft_id)
+            doc = draft_doc or (
+                {"teams": row.teams, "rounds": row.rounds, "type": row.type,
+                 "draft_order": row.draft_order} if row else {}
+            )  # fmt: skip
+            picks = s.execute(
+                select(DraftPick.pick_no, DraftPick.draft_slot, DraftPick.sleeper_id,
+                       DraftPick.metadata_).where(DraftPick.draft_id == self._draft_id)
+            ).all()  # fmt: skip
+        self._spec = DraftSpec.build(self._spec_rules, doc)
+        my_slot = resolve_my_slot(
+            self._ctx.settings.my_draft_slot,
+            doc.get("draft_order"),
+            self._ctx.settings.sleeper_user_id,
+        )
+        st = DraftState(self._spec, my_slot=my_slot, position_of=self._positions.get)
+        st.rebuild(
+            {"pick_no": p[0], "draft_slot": p[1], "sleeper_id": p[2], "metadata_": p[3]}
+            for p in picks
+        )
+        self.state = st
+
+    def on_the_clock(self) -> bool:
+        st = self.state
+        return st.my_slot is not None and st.on_the_clock == st.my_slot
+
+    def advice(self) -> list:  # noqa: ANN201 — list[BoardRow]
+        from lazy_sleeper.draft.signals import advise
+
+        return advise(
+            self._rows, self.state, self._adp, self._cfg,
+            search_rank_by_id=self._search_rank, rank_map=self._rank_map,
+        )  # fmt: skip
+
+    def render(self, position: str | None = None) -> str:
+        st = self.state
+        rows = self.advice()
+        if position:
+            rows = [r for r in rows if r.value.position == position.upper()]
+        until = st.picks_until_my_turn()
+        mine = st.my_roster()
+        head = (
+            f"pick {st.current_pick}/{st.spec.total_picks}  on the clock: slot {st.on_the_clock}  "
+            f"my slot: {st.my_slot or '?'}  until my turn: {'?' if until is None else until}"
+        )
+        needs = (
+            f"my open starters: {mine.open_starters or 'none'}  bench open: {mine.open_bench}"
+            if mine
+            else "my roster: unknown slot"
+        )
+        lines = [
+            head,
+            needs,
+            f"{'score':>6} {'vorp':>6} {'surv':>5} {'adp':>6} {'tier':>4} {'run':>3}  player",
+        ]
+        for r in rows[: self._top]:
+            v = r.value
+            surv = "  n/a" if r.survival is None else f"{r.survival:5.2f}"
+            adp = "     -" if r.adp is None else f"{r.adp:6.1f}"
+            tier = "   -" if r.tier is None else f"{r.tier:4d}"
+            run = f"{'RUN' if r.run else '':>3}"
+            cliff = " CLIFF" if r.cliff else ""
+            lines.append(
+                f"{r.pick_score:6.1f} {v.vorp:6.1f} {surv} {adp} {tier} {run}  "
+                f"{self._names.get(v.sleeper_id, v.sleeper_id)}{cliff}"
+            )
+        return "\n".join(lines)
+
+
+@draft_app.command("advise")
+def draft_advise(
+    draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
+    top: int = typer.Option(12, help="Rows to show"),
+    position: str | None = typer.Option(None, help="Only this position"),
+    season: int = typer.Option(2026, help="Board season (projections/ADP)"),
+) -> None:
+    """Who should I take now? Available board by pick_score = VORP − expected best alternative
+    at my next pick + need bonus; with survival, run and cliff flags (LS-33). Reads the draft
+    state from core.draft_picks — run `lazy draft poll` (or `lazy pull picks --load`) first."""
+    ctx = _Ctx()
+    did = draft_id or ctx.settings.sleeper_draft_id
+    typer.echo(_Adviser(ctx, did, season, top).render(position))
+
+
 def _draft_log_file(draft_id: str) -> Path:
     """Route INFO+ logging to data/logs/draft_poll_<id>_<stamp>.log; console keeps WARNING+.
     The poller logs one `poll …` and one `pick …` key=value line per event, so the file is the
@@ -1253,6 +1407,9 @@ def draft_poll(
     max_backoff: float = typer.Option(60.0, help="Cap on the error backoff, seconds"),
     once: bool = typer.Option(False, help="Poll a single time and exit"),
     forever: bool = typer.Option(False, help="Keep polling after the draft reports complete"),
+    advise: bool = typer.Option(False, help="Print my top picks whenever I'm on the clock (LS-33)"),
+    top: int = typer.Option(12, help="Rows in the advice table"),
+    season: int = typer.Option(2026, help="Board season (projections/ADP)"),
 ) -> None:
     """Poll /draft/{id}/picks until the draft completes (LS-31). Every poll is snapshotted;
     core.draft_picks is synced; each new pick is printed as it lands. Ctrl-C stops cleanly."""
@@ -1299,7 +1456,13 @@ def draft_poll(
         who = name_of(ev.sleeper_id, ev.metadata)
         typer.echo(f"#{ev.pick_no:3d} R{ev.round}.{ev.draft_slot:<2d} {who}{auto}{tag}")
 
+    adviser = _Adviser(ctx, did, season, top) if advise else None
+
     def on_poll(r) -> None:  # noqa: ANN001
+        if adviser and (r.new or r.poll_seq == 1 or r.removed):
+            adviser.refresh(poller.draft)
+            if adviser.on_the_clock():
+                typer.echo(adviser.render())
         if r.unchanged or r.new:
             return
         typer.echo(f"poll {r.poll_seq}: {r.picks} picks, {r.removed} removed, status {r.status}")

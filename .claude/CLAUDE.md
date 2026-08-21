@@ -16,8 +16,31 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
   #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-33** (survival probability + position runs — inputs: `DraftState.window_needs()` /
-  `window_open_starters()`, ADP, `search_rank`). LS-31 merged PR #23, LS-32 in PR #24 (2026-08-21).
+- **Next up: LS-34** (recompute loop: board built once pre-draft, `advise()` re-run on each
+  `PickEvent`, timed < 10 s avg — `_Adviser` in `jobs/cli.py` is the prototype of that wiring).
+  LS-31 #23, LS-32 #24 merged; LS-33 in PR #25 (2026-08-21).
+- **Signals (LS-33, `draft/signals.py`, migration 0010):** `advise(rows, state, adp_by_id, cfg,
+  search_rank_by_id=, rank_map=, horizon=)` → available `BoardRow`s with `survival`, `run`,
+  `run_count`, `pick_score`, best pick first. **Survival** = `1 − Φ((n − ½ − adp)/σ)`, `σ =
+  max(survival_sigma_min 4, survival_sigma_pct 0.12 × adp)`, `n` = my *next* pick (the one after the
+  pick I'm deciding; `horizon` = `teams` when my slot is unknown), window stretched by
+  `demand_shift 0.5 × relative positional need` of the teams picking before me; ADP `999` = undrafted
+  sentinel → pseudo-ADP from `search_rank` via `SearchRankAdp` (monotone, fitted on players with
+  both); neither → `survival None`. **Runs**: last `run_window 8` picks, `count ≥ run_threshold 4`
+  *or* `streak ≥ run_streak 3` (both dials shipped; pick on draft night). **pick_score** = `vorp −
+  option_value + need_bonus 8 × my_need[pos]`, option value = `E[best at my next pick] − E[best
+  without him]` over the survival-ordered chain across all positions — a sure-to-survive stud
+  scores ≈ 0, a 20 %-survival player keeps ≈ 80 % of his VORP; `BoardRow` signal fields are never
+  persisted. All 7 dials on `TierConfig`/`derived.board_config` (`lazy board config --run-streak …`,
+  `PUT /board/config`). CLI: **`lazy draft advise [--draft-id] [--top] [--position]`** (one-shot from
+  `core.draft_picks`) and **`lazy draft poll --advise`** (prints the table whenever I'm on the clock).
+  Calibration check in tests: on the 8/20 mock, players the room took before my next turn had lower
+  mean survival than those left. **Waiver-aware K/DEF** (after the 8/21 mock over-recommended them
+  mid-draft; migration 0011): `stream_depth 6` → `build_board`'s live baseline puts K/DEF replacement
+  at K6/DEF6 (`derive_baselines(..., stream_depth=)`, `STREAM_POSITIONS`), not the 12th starter;
+  `NeedWeights.starter_by_position` `{K: .25, DEF: .25}` (an open K seat ≠ an open RB1 seat);
+  `late_rounds 3` → K/DEF get no need bonus until the last 3 rounds (0 = always). Neither historical
+  baselines nor `lazy board baselines` use `stream_depth` — only the draft board does.
 - **Draft state (LS-32, `draft/state.py`, pure/in-memory):** `DraftSpec.build(rules, draft_doc)` =
   `RosterShape` + bench count + teams/rounds/type with snake/linear math (`slot_for_pick`,
   `pick_for`, `picks_for_slot`). `DraftState(spec, my_slot=, position_of=)` — `apply(PickEvent)` /

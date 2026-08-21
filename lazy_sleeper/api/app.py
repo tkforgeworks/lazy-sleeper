@@ -50,6 +50,16 @@ class BoardConfigBody(BaseModel):
     disagree_min_pts: float | None = Field(None, gt=0)
     disagree_pct: float | None = Field(None, gt=0)
     debias_disagreement: bool | None = None
+    # LS-33 draft-time signal dials
+    survival_sigma_min: float | None = Field(None, gt=0)
+    survival_sigma_pct: float | None = Field(None, gt=0)
+    demand_shift: float | None = Field(None, gt=0)
+    need_bonus: float | None = Field(None, gt=0)
+    run_window: int | None = Field(None, ge=1)
+    run_threshold: int | None = Field(None, ge=1)
+    run_streak: int | None = Field(None, ge=1)
+    stream_depth: int | None = Field(None, ge=0)
+    late_rounds: int | None = Field(None, ge=0)
 
 
 def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:

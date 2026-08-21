@@ -121,7 +121,7 @@ def test_needs_weighted_and_counts(spec: DraftSpec) -> None:
     empty = r.needs()
     # RB: 2 starters + 2 flex × 0.5/3 + 5 bench × 0.25 × 0.4
     assert empty["RB"] == pytest.approx(2 + 2 * 0.5 / 3 + 5 * 0.25 * 0.4, abs=1e-4)
-    assert empty["K"] == 1.0 and empty["DEF"] == 1.0
+    assert empty["K"] == 0.25 and empty["DEF"] == 0.25  # streamable seats count a quarter
     assert set(empty) == {"QB", "RB", "WR", "TE", "K", "DEF"}
 
     st = DraftState(spec)
@@ -179,7 +179,9 @@ def test_window_needs_sum_over_opponents(spec: DraftSpec) -> None:
     assert len(st.my_pick_window()) == 11
     w = st.window_needs()
     per_team_rb = 2 * DEFAULT_WEIGHTS.starter + 2 * DEFAULT_WEIGHTS.flex / 3 + 5 * 0.25 * 0.4
-    assert w["K"] == 11.0 and w["RB"] == pytest.approx(11 * per_team_rb, abs=1e-3)
+    assert w["K"] == pytest.approx(11 * 0.25) and w["RB"] == pytest.approx(
+        11 * per_team_rb, abs=1e-3
+    )
 
 
 # --- mutation ----------------------------------------------------------------------

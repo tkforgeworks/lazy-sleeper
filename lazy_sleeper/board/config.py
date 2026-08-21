@@ -16,8 +16,15 @@ NUMERIC_FIELDS = (
     "adp_pct",
     "disagree_min_pts",
     "disagree_pct",
+    "survival_sigma_min",
+    "survival_sigma_pct",
+    "demand_shift",
+    "need_bonus",
 )
-FIELDS = (*NUMERIC_FIELDS, "debias_disagreement")
+INT_FIELDS = ("run_window", "run_threshold", "run_streak")  # LS-33, positive ints
+NONNEG_INT_FIELDS = ("stream_depth", "late_rounds")  # LS-33, 0 = off
+BOOL_FIELDS = ("debias_disagreement",)
+FIELDS = (*NUMERIC_FIELDS, *INT_FIELDS, *NONNEG_INT_FIELDS, *BOOL_FIELDS)
 
 
 class BoardConfigRepository:
@@ -49,36 +56,25 @@ class BoardConfigRepository:
         row = self.row()
         return {**{name: getattr(row, name) for name in FIELDS}, "updated_at": row.updated_at}
 
-    def set(
-        self,
-        *,
-        cliff_gap: float | None = None,
-        gap_multiplier: float | None = None,
-        min_gap: float | None = None,
-        adp_min_delta: float | None = None,
-        adp_pct: float | None = None,
-        disagree_min_pts: float | None = None,
-        disagree_pct: float | None = None,
-        debias_disagreement: bool | None = None,
-    ) -> TierConfig:
-        numeric = {
-            "cliff_gap": cliff_gap,
-            "gap_multiplier": gap_multiplier,
-            "min_gap": min_gap,
-            "adp_min_delta": adp_min_delta,
-            "adp_pct": adp_pct,
-            "disagree_min_pts": disagree_min_pts,
-            "disagree_pct": disagree_pct,
-        }
-        for name, value in numeric.items():
-            if value is not None and value <= 0:
+    def set(self, **values: float | int | bool | None) -> TierConfig:
+        """Update any subset of ``FIELDS`` (None = leave alone). Numeric/int dials must be > 0."""
+        unknown = set(values) - set(FIELDS)
+        if unknown:
+            raise ValueError(f"unknown board_config field(s): {sorted(unknown)}")
+        for name, value in values.items():
+            if value is None:
+                continue
+            if name in NUMERIC_FIELDS and value <= 0:
                 raise ValueError(f"{name} must be positive, got {value}")
+            if name in INT_FIELDS and (int(value) != value or value < 1):
+                raise ValueError(f"{name} must be a positive integer, got {value}")
+            if name in NONNEG_INT_FIELDS and (int(value) != value or value < 0):
+                raise ValueError(f"{name} must be a non-negative integer, got {value}")
         row = self.row()
-        for name, value in numeric.items():
+        for name, value in values.items():
             if value is not None:
-                setattr(row, name, value)
-        if debias_disagreement is not None:
-            row.debias_disagreement = debias_disagreement
+                is_int = name in INT_FIELDS or name in NONNEG_INT_FIELDS
+                setattr(row, name, int(value) if is_int else value)
         row.updated_at = datetime.now(UTC)
         self._s.flush()
         return self.get()

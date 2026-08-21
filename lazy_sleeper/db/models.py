@@ -336,6 +336,17 @@ class BoardConfig(Base):
     disagree_min_pts: Mapped[float] = mapped_column(Float, nullable=False, default=20.0)
     disagree_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.15)
     debias_disagreement: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # LS-33 draft-time signal dials (migration 0010)
+    survival_sigma_min: Mapped[float] = mapped_column(Float, nullable=False, default=4.0)
+    survival_sigma_pct: Mapped[float] = mapped_column(Float, nullable=False, default=0.12)
+    demand_shift: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    need_bonus: Mapped[float] = mapped_column(Float, nullable=False, default=8.0)
+    run_window: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    run_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    run_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    # LS-33 follow-up (migration 0011): waiver-aware K/DEF
+    stream_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=6)
+    late_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

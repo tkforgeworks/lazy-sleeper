@@ -79,8 +79,16 @@ class PositionBaseline:
 # --- pure ---------------------------------------------------------------------------------
 
 
-def derive_baselines(rows: Iterable[PointsRow], shape: RosterShape) -> dict[str, PositionBaseline]:
+def derive_baselines(
+    rows: Iterable[PointsRow],
+    shape: RosterShape,
+    *,
+    stream_depth: Mapping[str, int] | None = None,
+) -> dict[str, PositionBaseline]:
     """Baseline per position: fill dedicated seats top-down, then flex seats greedily by value.
+
+    ``stream_depth`` overrides the cutoff for streamable positions (K/DEF): replacement level
+    is the best waiver option, not the 12th starter — ``{"K": 6}`` = the 6th-best K (LS-33).
 
     Flex seats are filled most-restrictive-first (fewest eligible positions) so a narrow seat is
     never starved by a general one. A position short of its seats clamps at its last player.
@@ -109,6 +117,10 @@ def derive_baselines(rows: Iterable[PointsRow], shape: RosterShape) -> dict[str,
         _, pos = max(candidates)  # points tie → alphabetically last position; deterministic
         taken[pos] = taken.get(pos, 0) + 1
         fills[pos] += 1
+
+    for pos, depth in (stream_depth or {}).items():
+        if pos in ranked and depth > 0:
+            taken[pos] = min(depth, len(ranked[pos]))
 
     out: dict[str, PositionBaseline] = {}
     for pos, cutoff in taken.items():

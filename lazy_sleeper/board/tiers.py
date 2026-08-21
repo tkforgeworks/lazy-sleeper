@@ -41,6 +41,16 @@ class TierConfig:
     disagree_min_pts: float = 20.0  # season pts: member spread floor for a disagreement flag
     disagree_pct: float = 0.15  # ...or this fraction of the blended points, whichever is larger
     debias_disagreement: bool = True  # remove each member's position-level bias before comparing
+    # LS-33 draft-time signals (see draft/signals.py); stored in derived.board_config too.
+    survival_sigma_min: float = 4.0  # picks: ADP scatter floor
+    survival_sigma_pct: float = 0.12  # ...or this fraction of the ADP, whichever is larger
+    demand_shift: float = 0.5  # window stretch per unit of relative positional demand
+    need_bonus: float = 8.0  # pick_score points per unit of my need score at the position
+    run_window: int = 8  # picks looked back for a position run
+    run_threshold: int = 4  # ...run when this many in the window are one position
+    run_streak: int = 3  # ...or this many consecutive most-recent picks are
+    stream_depth: int = 6  # K/DEF replacement = this rank (waiver reality), 0 = last starter
+    late_rounds: int = 3  # K/DEF need bonus only within the last N rounds (0 = always)
 
 
 @dataclass(frozen=True)
@@ -55,6 +65,11 @@ class BoardRow:
     adp_flag: str | None = None  # "value" | "reach" | None
     spread: float | None = None  # |sleeper − espn| league-scored points (debiased if configured)
     disagree: bool = False
+    # LS-33 — filled by draft/signals.py::advise at draft time; never persisted.
+    survival: float | None = None  # P(still available at my next pick); None = no market data
+    run: bool = False  # his position is being run on
+    run_count: int = 0  # picks at his position in the run window
+    pick_score: float | None = None  # vorp − E[best alternative at my next pick] + need bonus
 
 
 def assign_tiers(values: Sequence[PlayerValue], config: TierConfig | None = None) -> list[BoardRow]:

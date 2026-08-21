@@ -34,6 +34,7 @@ from lazy_sleeper.board.tiers import BoardRow, TierConfig, assign_tiers
 from lazy_sleeper.board.vorp import vorp_board
 from lazy_sleeper.providers.base import ProjectionProvider
 
+STREAM_POSITIONS = ("K", "DEF")  # replaceable from waivers: baseline at config.stream_depth
 DEFAULT_MEMBERS = ("sleeper", "espn")
 
 
@@ -131,7 +132,15 @@ def build_board(
     config = config or TierConfig()
     projections = provider.projections(season)
     if baselines is None:
-        live = derive_baselines([(p.sleeper_id, p.position, p.points) for p in projections], shape)
+        live = derive_baselines(
+            [(p.sleeper_id, p.position, p.points) for p in projections],
+            shape,
+            stream_depth=(
+                dict.fromkeys(STREAM_POSITIONS, config.stream_depth)
+                if config.stream_depth
+                else None
+            ),
+        )
         baselines = {pos: b.points for pos, b in live.items()}
     rows = assign_tiers(vorp_board(projections, baselines), config)
     rows = flag_adp(rows, adp_by_id or {}, config)
