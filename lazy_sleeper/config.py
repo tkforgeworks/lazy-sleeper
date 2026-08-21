@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     sleeper_league_id: str = "1392685475625443328"
     sleeper_draft_id: str = "1392685476523024384"
     sleeper_user_id: str = "1268591266036203520"
+    my_draft_slot: int | None = None  # override when Sleeper assigns draft_order late (LS-32)
 
     # Be polite to undocumented endpoints.
     http_timeout_s: float = 60.0

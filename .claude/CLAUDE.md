@@ -16,9 +16,22 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
   #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-32** (draft-state model: per-team rosters/needs/slot/picks-until-my-turn — consumes
-  `PickEvent`s and `core.draft_picks`; LS-31's `DraftPoller.my_slot(user_id)` + `Settings.sleeper_user_id`
-  already resolve "my seat"). LS-31 in PR #23 (2026-08-21).
+- **Next up: LS-33** (survival probability + position runs — inputs: `DraftState.window_needs()` /
+  `window_open_starters()`, ADP, `search_rank`). LS-31 merged PR #23, LS-32 in PR #24 (2026-08-21).
+- **Draft state (LS-32, `draft/state.py`, pure/in-memory):** `DraftSpec.build(rules, draft_doc)` =
+  `RosterShape` + bench count + teams/rounds/type with snake/linear math (`slot_for_pick`,
+  `pick_for`, `picks_for_slot`). `DraftState(spec, my_slot=, position_of=)` — `apply(PickEvent)` /
+  `add` / `remove` (undo) / `rebuild(rows)` (from `core.draft_picks` on start; idempotent, out-of-order
+  safe by re-seating the team). Seats fill greedily in pick order: dedicated → eligible FLEX → BN
+  (position from the pick's `metadata`, `position_of` fallback). `TeamRoster` exposes **counts**
+  (`open_starters`, `open_flex`, `open_bench`, `counts`) and a **score** `needs(NeedWeights)` =
+  starter 1.0 + flex 0.5 split across eligible + bench 0.25 × `bench_mix` (RB/WR .4, TE/QB .1) —
+  tunable for LS-33. Queries: `current_pick`, `on_the_clock`, `my_next_pick`, `picks_until_my_turn`
+  (0 = on the clock), `my_pick_window` (opponent pick_nos before my turn; a snake turn counts a team
+  twice), `window_open_starters`/`window_needs` (demand before my turn), `taken()` (pool filter),
+  `my_roster`/`my_needs`. `my_slot` = `resolve_my_slot(Settings.my_draft_slot, draft_order,
+  sleeper_user_id)` → None-safe everywhere. Replayed on the 8/20 mock: 12×15 seated; Tim (slot 8) took
+  4 TE / 2 K and no DEF → `open_starters {"DEF": 1}` (real rosters can leave a starter open).
 - **Poller (LS-31, `draft/poller.py`, `lazy draft poll`):** `DraftPoller(source, sink, draft_id)` —
   `poll_once()` = snapshot picks → `sink.sync` (= `load_draft_picks`) → diff pick_nos against what the
   table held → one `PickEvent` per new pick (pick_no order; carries slot/round/sleeper_id/`metadata`
