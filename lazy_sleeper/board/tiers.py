@@ -49,6 +49,8 @@ class TierConfig:
     run_window: int = 8  # picks looked back for a position run
     run_threshold: int = 4  # ...run when this many in the window are one position
     run_streak: int = 3  # ...or this many consecutive most-recent picks are
+    stream_depth: int = 6  # K/DEF replacement = this rank (waiver reality), 0 = last starter
+    late_rounds: int = 3  # K/DEF need bonus only within the last N rounds (0 = always)
 
 
 @dataclass(frozen=True)

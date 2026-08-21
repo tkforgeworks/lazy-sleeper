@@ -37,6 +37,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from statistics import median
 
+from lazy_sleeper.board.flags import STREAM_POSITIONS
 from lazy_sleeper.board.tiers import BoardRow, TierConfig
 from lazy_sleeper.draft.state import DraftState
 
@@ -188,7 +189,11 @@ def advise(
         for p in range(now + 1 if on_clock else now, min(nxt, state.spec.total_picks + 1)):
             acc.update(state.roster(state.spec.slot_for_pick(p)).needs())
         window_needs = dict(acc)
-    my_needs = state.my_needs() or {}
+    my_needs = dict(state.my_needs() or {})
+    # K/DEF: fill them last — no need bonus until the final `late_rounds` rounds
+    if cfg.late_rounds and state.spec.round_of(now) <= state.spec.rounds - cfg.late_rounds:
+        for pos in STREAM_POSITIONS:
+            my_needs.pop(pos, None)
     recent = [p for _, _, p in (state.pick_at(n) for n in range(max(1, now - cfg.run_window), now))]
     runs = detect_runs(recent, cfg)
 

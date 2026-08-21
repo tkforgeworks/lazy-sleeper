@@ -1114,6 +1114,8 @@ def board_config_cmd(
     run_window: int | None = typer.Option(None, help="Picks looked back for a run"),
     run_threshold: int | None = typer.Option(None, help="Run when this many in the window"),
     run_streak: int | None = typer.Option(None, help="...or this many consecutive"),
+    stream_depth: int | None = typer.Option(None, help="K/DEF baseline rank (0 = last starter)"),
+    late_rounds: int | None = typer.Option(None, help="K/DEF need bonus only in last N rounds"),
 ) -> None:
     """Show (no options) or update the stored tier/cliff/flag/draft-signal thresholds."""
     from lazy_sleeper.board import BoardConfigRepository
@@ -1138,6 +1140,8 @@ def board_config_cmd(
                 run_window=run_window,
                 run_threshold=run_threshold,
                 run_streak=run_streak,
+                stream_depth=stream_depth,
+                late_rounds=late_rounds,
             )
         except ValueError as e:
             raise typer.BadParameter(str(e)) from e
@@ -1151,7 +1155,8 @@ def board_config_cmd(
         f"survival_sigma_pct={cfg.survival_sigma_pct:g}  "
         f"demand_shift={cfg.demand_shift:g}  need_bonus={cfg.need_bonus:g}\n"
         f"run_window={cfg.run_window}  run_threshold={cfg.run_threshold}  "
-        f"run_streak={cfg.run_streak}"
+        f"run_streak={cfg.run_streak}\n"
+        f"stream_depth={cfg.stream_depth}  late_rounds={cfg.late_rounds}"
     )
 
 

@@ -58,6 +58,8 @@ class BoardConfigBody(BaseModel):
     run_window: int | None = Field(None, ge=1)
     run_threshold: int | None = Field(None, ge=1)
     run_streak: int | None = Field(None, ge=1)
+    stream_depth: int | None = Field(None, ge=0)
+    late_rounds: int | None = Field(None, ge=0)
 
 
 def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:

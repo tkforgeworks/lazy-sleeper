@@ -35,7 +35,12 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   `PUT /board/config`). CLI: **`lazy draft advise [--draft-id] [--top] [--position]`** (one-shot from
   `core.draft_picks`) and **`lazy draft poll --advise`** (prints the table whenever I'm on the clock).
   Calibration check in tests: on the 8/20 mock, players the room took before my next turn had lower
-  mean survival than those left.
+  mean survival than those left. **Waiver-aware K/DEF** (after the 8/21 mock over-recommended them
+  mid-draft; migration 0011): `stream_depth 6` → `build_board`'s live baseline puts K/DEF replacement
+  at K6/DEF6 (`derive_baselines(..., stream_depth=)`, `STREAM_POSITIONS`), not the 12th starter;
+  `NeedWeights.starter_by_position` `{K: .25, DEF: .25}` (an open K seat ≠ an open RB1 seat);
+  `late_rounds 3` → K/DEF get no need bonus until the last 3 rounds (0 = always). Neither historical
+  baselines nor `lazy board baselines` use `stream_depth` — only the draft board does.
 - **Draft state (LS-32, `draft/state.py`, pure/in-memory):** `DraftSpec.build(rules, draft_doc)` =
   `RosterShape` + bench count + teams/rounds/type with snake/linear math (`slot_for_pick`,
   `pick_for`, `picks_for_slot`). `DraftState(spec, my_slot=, position_of=)` — `apply(PickEvent)` /

@@ -22,8 +22,9 @@ NUMERIC_FIELDS = (
     "need_bonus",
 )
 INT_FIELDS = ("run_window", "run_threshold", "run_streak")  # LS-33, positive ints
+NONNEG_INT_FIELDS = ("stream_depth", "late_rounds")  # LS-33, 0 = off
 BOOL_FIELDS = ("debias_disagreement",)
-FIELDS = (*NUMERIC_FIELDS, *INT_FIELDS, *BOOL_FIELDS)
+FIELDS = (*NUMERIC_FIELDS, *INT_FIELDS, *NONNEG_INT_FIELDS, *BOOL_FIELDS)
 
 
 class BoardConfigRepository:
@@ -67,10 +68,13 @@ class BoardConfigRepository:
                 raise ValueError(f"{name} must be positive, got {value}")
             if name in INT_FIELDS and (int(value) != value or value < 1):
                 raise ValueError(f"{name} must be a positive integer, got {value}")
+            if name in NONNEG_INT_FIELDS and (int(value) != value or value < 0):
+                raise ValueError(f"{name} must be a non-negative integer, got {value}")
         row = self.row()
         for name, value in values.items():
             if value is not None:
-                setattr(row, name, int(value) if name in INT_FIELDS else value)
+                is_int = name in INT_FIELDS or name in NONNEG_INT_FIELDS
+                setattr(row, name, int(value) if is_int else value)
         row.updated_at = datetime.now(UTC)
         self._s.flush()
         return self.get()

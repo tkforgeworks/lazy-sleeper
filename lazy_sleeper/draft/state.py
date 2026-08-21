@@ -95,6 +95,10 @@ class NeedWeights:
 
     starter: float = 1.0
     flex: float = 0.5
+    # an open K/DEF seat is not an open RB1 seat: waivers refill it any week
+    starter_by_position: Mapping[str, float] = field(
+        default_factory=lambda: {"K": 0.25, "DEF": 0.25}
+    )
     bench: float = 0.25
     bench_mix: Mapping[str, float] = field(
         default_factory=lambda: {"RB": 0.4, "WR": 0.4, "TE": 0.1, "QB": 0.1}
@@ -170,7 +174,8 @@ class TeamRoster:
         score: dict[str, float] = dict.fromkeys(POSITIONS, 0.0)
         for pos, n in self._open_dedicated.items():
             if n > 0:
-                score[pos] = score.get(pos, 0.0) + n * weights.starter
+                factor = weights.starter_by_position.get(pos, 1.0)
+                score[pos] = score.get(pos, 0.0) + n * weights.starter * factor
         for elig in self._open_flex:
             share = weights.flex / len(elig)
             for pos in elig:

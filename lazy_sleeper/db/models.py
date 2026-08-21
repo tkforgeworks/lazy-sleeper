@@ -344,6 +344,9 @@ class BoardConfig(Base):
     run_window: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
     run_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     run_streak: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    # LS-33 follow-up (migration 0011): waiver-aware K/DEF
+    stream_depth: Mapped[int] = mapped_column(Integer, nullable=False, default=6)
+    late_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
