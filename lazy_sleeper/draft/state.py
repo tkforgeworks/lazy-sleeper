@@ -306,6 +306,10 @@ class DraftState:
     def my_roster(self) -> TeamRoster | None:
         return self._rosters[self.my_slot] if self.my_slot else None
 
+    def pick_at(self, pick_no: int) -> tuple[int | None, str | None, str | None]:
+        """(slot, sleeper_id, position) of a made pick, or (None, None, None)."""
+        return self._picks.get(pick_no, (None, None, None))
+
     def taken(self) -> frozenset[str]:
         """Drafted sleeper_ids — the available-pool filter."""
         return frozenset(sid for _, sid, _ in self._picks.values() if sid)
