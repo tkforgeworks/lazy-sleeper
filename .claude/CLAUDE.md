@@ -24,13 +24,19 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   table held → one `PickEvent` per new pick (pick_no order; carries slot/round/sleeper_id/`metadata`
   name; `picked_by None` = autopick). `run(on_pick, stop=, max_polls=, until_complete=)` loops at
   `interval_s` 5, backoff `interval×2^failures` capped `max_backoff_s` 60 (+≤25 % jitter), resets on
-  success, never dies; stops on draft `status == complete` or `picks ≥ rounds×teams`. Draft doc
-  re-read every 10 polls (refreshes `core.drafts`). Identical payload (sha256) → snapshot still
+  success, never dies; stops on draft `status == complete` or `picks ≥ rounds×teams` (+ a final
+  draft-doc refresh so `core.drafts` ends `complete`). Draft doc re-read **every poll until it has
+  `draft_order` and status `drafting`** (Sleeper filled `draft_order` in mid-draft on the 8/21 mock),
+  then every 10. CLI tags `<-- you` on `picked_by == sleeper_user_id` (slot match only for
+  autopicks) and writes INFO logs to `data/logs/draft_poll_<id>_<stamp>.log` (one `poll …`/`pick …`
+  key=value line each — the parseable record of the night); console shows picks + WARNING only. Identical payload (sha256) → snapshot still
   written, DB sync skipped. Undo = `PollResult.removed`, not an event. Sync callback on the poll
   thread (LS-34 wraps it in a thread or runs `lazy draft poll` as its own process). Ports:
   `SleeperPickSource`(session per poll)/`DbPickSink` in prod, `ReplaySource`/`MemorySink` in tests.
   **Replay fixture** `tests/fixtures/mock_draft_1396298350046760960.json.gz` (5.7 KB) = the mock's
   final 180 picks (metadata trimmed) + the 14 poll cut points — LS-36's offline replay head start.
+  Second mock `1396601438095835136` (2026-08-21, Tim slot 9) ran through `lazy draft poll` live:
+  56 polls, 180 picks, 0 failures, ~5.5 s cadence; also in `core.*` as dev data.
 - **Mock-draft rehearsal (2026-08-20):** league mock `1396298350046760960` (`metadata.type=league_mock`,
   started from the real league: 12 teams, 15 rds, 120 s) drafted to `complete`; polled with
   `lazy pull picks --draft-id … --load` every 20 s → 12 polls, 180 picks, 0 removals, loader unchanged.

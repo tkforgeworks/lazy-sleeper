@@ -1227,6 +1227,25 @@ def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
 # --- draft (M4) ------------------------------------------------------------
 
 
+def _draft_log_file(draft_id: str) -> Path:
+    """Route INFO+ logging to data/logs/draft_poll_<id>_<stamp>.log; console keeps WARNING+.
+    The poller logs one `poll …` and one `pick …` key=value line per event, so the file is the
+    parseable record of the night (picks, timings, backoff) while the terminal shows only picks."""
+    logs = Path("data/logs")
+    logs.mkdir(parents=True, exist_ok=True)
+    path = logs / f"draft_poll_{draft_id}_{datetime.now(UTC):%Y%m%dT%H%M%SZ}.log"
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    for h in root.handlers:  # the basicConfig stream handler from _root()
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            h.setLevel(logging.WARNING)
+    fh = logging.FileHandler(path, encoding="utf-8")
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))
+    root.addHandler(fh)
+    return path
+
+
 @draft_app.command("poll")
 def draft_poll(
     draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
@@ -1248,6 +1267,7 @@ def draft_poll(
     ctx = _Ctx()
     did = draft_id or ctx.settings.sleeper_draft_id
     me = ctx.settings.sleeper_user_id
+    log_path = _draft_log_file(did)
     source = SleeperPickSource(ctx.sessions, ctx.puller, SleeperClient(ctx.http), did)
     poller = DraftPoller(
         source, DbPickSink(ctx.sessions, did), did, interval_s=interval, max_backoff_s=max_backoff
@@ -1273,7 +1293,8 @@ def draft_poll(
         return f"{m.get('first_name', '?')} {m.get('last_name', '')} {m.get('position', '?')}"
 
     def on_pick(ev: PickEvent) -> None:
-        tag = " <-- you" if poller.my_slot(me) == ev.draft_slot else ""
+        mine = ev.picked_by == me or (ev.picked_by is None and poller.my_slot(me) == ev.draft_slot)
+        tag = " <-- you" if mine else ""
         auto = " (auto)" if ev.picked_by is None else ""
         who = name_of(ev.sleeper_id, ev.metadata)
         typer.echo(f"#{ev.pick_no:3d} R{ev.round}.{ev.draft_slot:<2d} {who}{auto}{tag}")
@@ -1283,8 +1304,7 @@ def draft_poll(
             return
         typer.echo(f"poll {r.poll_seq}: {r.picks} picks, {r.removed} removed, status {r.status}")
 
-    slot = poller.my_slot(me)
-    typer.echo(f"polling draft {did} every {interval:g}s (my slot: {slot or 'unknown yet'})")
+    typer.echo(f"polling draft {did} every {interval:g}s, log: {log_path}")
     summary = poller.run(
         on_pick,
         on_poll=on_poll,
@@ -1293,9 +1313,10 @@ def draft_poll(
         max_polls=1 if once else None,
     )
     exp = poller.expected_picks
+    slot = poller.my_slot(me)
     typer.echo(
-        f"done: {summary.polls} polls, {summary.events} new picks, {summary.failures} failures, "
-        f"status {poller.status}"
+        f"done: my slot {slot or '?'}, {summary.polls} polls, {summary.events} new picks, "
+        f"{summary.failures} failures, status {poller.status}"
         + (f" ({exp} expected)" if exp else "")
         + (" [stopped]" if summary.stopped else "")
     )

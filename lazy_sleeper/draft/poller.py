@@ -305,6 +305,12 @@ class DraftPoller:
             return None
         return int(self.draft["rounds"]) * int(self.draft["teams"])
 
+    @property
+    def draft_settled(self) -> bool:
+        """True once the doc has a draft order and the draft is underway. Until then Sleeper may
+        still be filling `draft_order` in (seen on the 2026-08-21 mock), so re-read every poll."""
+        return bool(self.draft and self.draft.get("draft_order") and self.status == "drafting")
+
     def my_slot(self, user_id: str | None) -> int | None:
         order = (self.draft or {}).get("draft_order") or {}
         v = order.get(str(user_id)) if user_id else None
@@ -313,7 +319,7 @@ class DraftPoller:
     # -- one iteration ------------------------------------------------------------
     def poll_once(self) -> PollResult:
         seq = self._seq + 1
-        if seq == 1 or seq % self.draft_refresh_every == 0:
+        if not self.draft_settled or seq % self.draft_refresh_every == 0:
             self._refresh_draft()
         pulled = self._source.picks()
         sha = hashlib.sha256(pulled.payload).hexdigest()
@@ -363,6 +369,14 @@ class DraftPoller:
         self.draft = parse_draft(payload)
         self._sink.store_draft(payload)
 
+    def _final_refresh(self) -> None:
+        """Sleeper flips `status` to complete a beat after the last pick; catch it so
+        `core.drafts` ends with `complete` + `last_picked` instead of a stale `drafting`."""
+        try:
+            self._refresh_draft()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("final draft refresh failed (%s); core.drafts may show stale status", exc)
+
     # -- the loop -----------------------------------------------------------------
     def run(
         self,
@@ -396,8 +410,28 @@ class DraftPoller:
 
             failures = 0
             summary.polls += 1
+            log.info(
+                "poll seq=%d snapshot=%s picks=%d removed=%d new=%d unchanged=%s status=%s",
+                result.poll_seq,
+                result.snapshot_id,
+                result.picks,
+                result.removed,
+                len(result.new),
+                result.unchanged,
+                result.status,
+            )
             for ev in result.new:
                 summary.events += 1
+                log.info(
+                    "pick draft=%s pick_no=%d round=%s slot=%s player=%s picked_by=%s seen=%s",
+                    ev.draft_id,
+                    ev.pick_no,
+                    ev.round,
+                    ev.draft_slot,
+                    ev.sleeper_id,
+                    ev.picked_by or "auto",
+                    ev.first_seen_at.isoformat(),
+                )
                 if on_pick is None:
                     continue
                 try:
@@ -408,6 +442,7 @@ class DraftPoller:
                 on_poll(result)
             if until_complete and result.complete:
                 summary.complete = True
+                self._final_refresh()
                 break
             if max_polls is not None and summary.polls >= max_polls:
                 break

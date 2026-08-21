@@ -232,3 +232,39 @@ def test_replay_source_reports_drafting_until_exhausted(fx: ReplayFixture) -> No
     assert json.loads(src.draft())["status"] == "complete"
     with pytest.raises(StopIteration):
         src.picks()
+
+
+# --- draft-doc refresh cadence ------------------------------------------------
+
+
+class _CountingSource(ReplaySource):
+    """Draft doc is unsettled (no draft_order) for the first `unsettled` reads."""
+
+    def __init__(self, fx: ReplayFixture, counts: list[int], unsettled: int) -> None:
+        super().__init__(fx, counts=counts)
+        self.draft_reads = 0
+        self._unsettled = unsettled
+
+    def draft(self) -> bytes:
+        self.draft_reads += 1
+        doc = dict(self._fx.draft)
+        doc["status"] = "drafting"
+        if self.draft_reads <= self._unsettled:
+            doc["draft_order"] = None  # Sleeper hadn't assigned seats yet (2026-08-21 mock)
+        return json.dumps(doc).encode()
+
+
+def test_draft_doc_reread_every_poll_until_order_assigned_then_every_n(fx: ReplayFixture) -> None:
+    src = _CountingSource(fx, counts=[40] * 12, unsettled=3)
+    p, _, _ = _poller(fx, src, draft_refresh_every=5)
+    p.run(max_polls=12, until_complete=False)
+    # polls 1–3 unsettled → read each; settled on poll 4 (read); then only polls 5 and 10.
+    assert src.draft_reads == 4 + 2
+    assert p.my_slot("1268591266036203520") == 8
+
+
+def test_completion_triggers_a_final_draft_refresh(fx: ReplayFixture) -> None:
+    src = _CountingSource(fx, counts=[180], unsettled=0)
+    p, _, _ = _poller(fx, src, draft_refresh_every=10)
+    summary = p.run()
+    assert summary.complete and src.draft_reads == 2  # poll 1 + the final refresh
