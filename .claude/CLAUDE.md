@@ -16,8 +16,27 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
   #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-31** (first live-companion story — read the ticket, propose poller + draft-state model
-  shape before coding). LS-16 (draft state → core) done 2026-08-20, PR #21.
+- **Next up: LS-32** (draft-state model: per-team rosters/needs/slot/picks-until-my-turn — consumes
+  `PickEvent`s and `core.draft_picks`; LS-31's `DraftPoller.my_slot(user_id)` + `Settings.sleeper_user_id`
+  already resolve "my seat"). LS-31 in PR #23 (2026-08-21).
+- **Poller (LS-31, `draft/poller.py`, `lazy draft poll`):** `DraftPoller(source, sink, draft_id)` —
+  `poll_once()` = snapshot picks → `sink.sync` (= `load_draft_picks`) → diff pick_nos against what the
+  table held → one `PickEvent` per new pick (pick_no order; carries slot/round/sleeper_id/`metadata`
+  name; `picked_by None` = autopick). `run(on_pick, stop=, max_polls=, until_complete=)` loops at
+  `interval_s` 5, backoff `interval×2^failures` capped `max_backoff_s` 60 (+≤25 % jitter), resets on
+  success, never dies; stops on draft `status == complete` or `picks ≥ rounds×teams` (+ a final
+  draft-doc refresh so `core.drafts` ends `complete`). Draft doc re-read **every poll until it has
+  `draft_order` and status `drafting`** (Sleeper filled `draft_order` in mid-draft on the 8/21 mock),
+  then every 10. CLI tags `<-- you` on `picked_by == sleeper_user_id` (slot match only for
+  autopicks) and writes INFO logs to `data/logs/draft_poll_<id>_<stamp>.log` (one `poll …`/`pick …`
+  key=value line each — the parseable record of the night); console shows picks + WARNING only. Identical payload (sha256) → snapshot still
+  written, DB sync skipped. Undo = `PollResult.removed`, not an event. Sync callback on the poll
+  thread (LS-34 wraps it in a thread or runs `lazy draft poll` as its own process). Ports:
+  `SleeperPickSource`(session per poll)/`DbPickSink` in prod, `ReplaySource`/`MemorySink` in tests.
+  **Replay fixture** `tests/fixtures/mock_draft_1396298350046760960.json.gz` (5.7 KB) = the mock's
+  final 180 picks (metadata trimmed) + the 14 poll cut points — LS-36's offline replay head start.
+  Second mock `1396601438095835136` (2026-08-21, Tim slot 9) ran through `lazy draft poll` live:
+  56 polls, 180 picks, 0 failures, ~5.5 s cadence; also in `core.*` as dev data.
 - **Mock-draft rehearsal (2026-08-20):** league mock `1396298350046760960` (`metadata.type=league_mock`,
   started from the real league: 12 teams, 15 rds, 120 s) drafted to `complete`; polled with
   `lazy pull picks --draft-id … --load` every 20 s → 12 polls, 180 picks, 0 removals, loader unchanged.
@@ -37,8 +56,8 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   autopick → NULL. `parse_*` are pure (tested on fixtures; the picks fixture is hand-built from
   Sleeper's documented shape — no real 2026 picks exist yet); `load_*` upsert via attr→column map
   (`metadata_` ↔ `metadata`). CLI: `lazy load league [--draft-id]`, `lazy pull league --load`,
-  `lazy pull picks --draft-id <mock> --load` = the way to exercise the poller on a Sleeper mock draft
-  before 9/4. Not in the daily workflow (draft state is a draft-night poll, not a daily pull).
+  `lazy draft poll --draft-id <mock>` = the way to exercise the poller on a Sleeper mock draft
+  before 9/4 (`lazy pull picks --load` is the one-shot equivalent). Not in the daily workflow (draft state is a draft-night poll, not a daily pull).
 - **Board serving (LS-30, `board/store.py` + `board/render.py`, migration 0008):** `regenerate(session,
   provider, rules, scorer, season, baseline=)` = `build_board` + `core.players` name/injury join →
   `derived.boards` (dated, immutable, `config` JSONB snapshot) + `derived.board_rows` (flattened
@@ -49,7 +68,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   uploaded as a 14-day artifact by `daily-pull.yml`, which runs regen after freshness). Provider
   names resolve in one place: `providers.make_provider(session, scorer, name)`; `_Ctx.provider` and
   the API both use it. `ingest.snapshots.store_from_settings(settings)` builds the SnapshotStore.
-- **Open loose ends:** LS-16 (draft picks/rosters → core). LS-51 (freshness flags historical seasons
+- **Open loose ends:** LS-51 (freshness flags historical seasons
   STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
   latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
   as of 2026-08-19 (each pull appends a 17k-row ESPN kona vintage); land before the free tier bites.
