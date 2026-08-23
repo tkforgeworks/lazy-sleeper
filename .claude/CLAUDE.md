@@ -11,14 +11,30 @@ M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benc
 M3 consensus draft board ✅ (2026-08-20) → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
 Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
-## Status (updated 2026-08-20 — refresh this block whenever a story merges)
+## Status (updated 2026-08-23 — refresh this block whenever a story merges)
 
 - **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
   #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-34** (recompute loop: board built once pre-draft, `advise()` re-run on each
-  `PickEvent`, timed < 10 s avg — `_Adviser` in `jobs/cli.py` is the prototype of that wiring).
-  LS-31 #23, LS-32 #24 merged; LS-33 in PR #25 (2026-08-21).
+- **Next up: LS-35** (`GET /draft/{id}/state` serving `DraftEngine.latest` — host the `DraftRunner`
+  in the API process, or the API reads the engine in-process started by `POST /draft/{id}/start`).
+  LS-31 #23, LS-32 #24, LS-33 #25, LS-34 #26 merged.
+- **Recompute loop (LS-34, `draft/engine.py`):** `BoardContext` = everything `advise` needs that
+  doesn't change during the draft (board rows, ADP, search-rank map, names/positions), loaded once
+  via `load_board_context(session, provider, rules, cfg, season)`. `DraftEngine(board, rules,
+  draft_doc=, my_slot=, user_id=)` owns the `DraftState`; `on_pick(ev)` / `remove(pick_no)` /
+  `rebuild(rows)` / `set_draft(doc)` (re-spec mid-draft keeping seated picks — Sleeper fills
+  `draft_order` late) each recompute under an RLock and publish a frozen `Advice` (`seq, pick_no,
+  on_the_clock, my_slot, picks_until_my_turn, rows, elapsed_s, error, stale`, `.my_turn`) on
+  `engine.latest`; a failing recompute re-publishes the last-good rows with `error` set, never
+  blocks. `engine.timing` = count/avg/max/failures. `DraftRunner(poller, engine, reload_rows=,
+  on_pick=, on_advice=, on_poll=)` runs the poller into the engine (`run()` blocking or `start()`
+  daemon thread for LS-35); rebuilds from `reload_rows()` on poll 1 and on undo, re-specs when the
+  draft doc changes. **Measured: 45–48 ms/recompute on the real 490-row board, 71 ms avg / 92 ms
+  max on a 700-row synthetic over all 180 picks** (AC was < 10 s avg / < 30 s max — timed test
+  `test_full_draft_recompute_is_fast`). CLI: `lazy draft advise` = one-shot engine; `lazy draft
+  poll --advise` = runner, prints the table once per pick when I'm on the clock and a recompute
+  summary at the end. `DraftState.picks` is a read-only view of seated picks.
 - **Signals (LS-33, `draft/signals.py`, migration 0010):** `advise(rows, state, adp_by_id, cfg,
   search_rank_by_id=, rank_map=, horizon=)` → available `BoardRow`s with `survival`, `run`,
   `run_count`, `pick_score`, best pick first. **Survival** = `1 − Φ((n − ½ − adp)/σ)`, `σ =

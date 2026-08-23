@@ -1252,118 +1252,80 @@ def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
 # --- draft (M4) ------------------------------------------------------------
 
 
-class _Adviser:
-    """Pre-draft board built once; draft state rebuilt from core.draft_picks on each refresh."""
+def _draft_engine(ctx: _Ctx, draft_id: str, season: int):  # noqa: ANN202 — DraftEngine
+    """Pre-draft load (board + ADP + player lookup, once) → engine seeded from core.draft_picks."""
+    from lazy_sleeper.board import BoardConfigRepository
+    from lazy_sleeper.draft.engine import DraftEngine, load_board_context
+    from lazy_sleeper.scoring import load_league_rules
 
-    def __init__(self, ctx: _Ctx, draft_id: str, season: int, top: int) -> None:
-        from sqlalchemy import select
+    with session_scope(ctx.sessions) as s:
+        rules = load_league_rules(s, ctx.store)
+        cfg = BoardConfigRepository(s).get()
+        board = load_board_context(s, ctx.provider(s, "ensemble"), rules, cfg, season)
+    engine = DraftEngine(
+        board, rules, draft_doc=_draft_doc(ctx, draft_id),
+        my_slot=ctx.settings.my_draft_slot, user_id=ctx.settings.sleeper_user_id,
+    )  # fmt: skip
+    engine.rebuild(_draft_pick_rows(ctx, draft_id))
+    return engine
 
-        from lazy_sleeper.board import BoardConfigRepository, RosterShape, build_board, latest_adp
-        from lazy_sleeper.db.models import Player
-        from lazy_sleeper.draft.signals import SearchRankAdp
-        from lazy_sleeper.draft.state import DraftSpec
-        from lazy_sleeper.scoring import load_league_rules
 
-        self._ctx, self._draft_id, self._top = ctx, draft_id, top
-        with session_scope(ctx.sessions) as s:
-            rules = load_league_rules(s, ctx.store)
-            self._cfg = BoardConfigRepository(s).get()
-            self._rows = build_board(
-                ctx.provider(s, "ensemble"), RosterShape.from_rules(rules), season, self._cfg,
-                latest_adp(s, season),
-            )  # fmt: skip
-            self._adp = latest_adp(s, season)
-            players = s.execute(
-                select(Player.sleeper_id, Player.full_name, Player.position, Player.team,
-                       Player.search_rank)
-            ).all()  # fmt: skip
-        self._names = {p[0]: f"{p[1]} {p[2]}/{p[3]}" for p in players}
-        self._positions = {p[0]: p[2] for p in players}
-        self._search_rank = {p[0]: p[4] for p in players if p[4] is not None}
-        self._rank_map = SearchRankAdp(
-            (self._search_rank[sid], adp)
-            for sid, adp in self._adp.items()
-            if sid in self._search_rank
+def _draft_doc(ctx: _Ctx, draft_id: str) -> dict | None:
+    from lazy_sleeper.db.models import Draft
+
+    with session_scope(ctx.sessions) as s:
+        row = s.get(Draft, draft_id)
+        if row is None:
+            return None
+        return {"teams": row.teams, "rounds": row.rounds, "type": row.type,
+                "draft_order": row.draft_order}  # fmt: skip
+
+
+def _draft_pick_rows(ctx: _Ctx, draft_id: str) -> list[dict]:
+    from sqlalchemy import select
+
+    from lazy_sleeper.db.models import DraftPick
+
+    with session_scope(ctx.sessions) as s:
+        picks = s.execute(
+            select(DraftPick.pick_no, DraftPick.draft_slot, DraftPick.sleeper_id,
+                   DraftPick.metadata_).where(DraftPick.draft_id == draft_id)
+        ).all()  # fmt: skip
+    return [
+        {"pick_no": p[0], "draft_slot": p[1], "sleeper_id": p[2], "metadata_": p[3]} for p in picks
+    ]
+
+
+def render_advice(  # noqa: ANN001
+    advice, names: dict[str, str], top: int, position: str | None = None
+) -> str:
+    """Text table for the terminal (LS-33/34): header line, then top rows by pick_score."""
+    rows = advice.rows
+    if position:
+        rows = [r for r in rows if r.value.position == position.upper()]
+    until = advice.picks_until_my_turn
+    head = (
+        f"pick {advice.pick_no}  on the clock: slot {advice.on_the_clock}  "
+        f"my slot: {advice.my_slot or '?'}  until my turn: {'?' if until is None else until}  "
+        f"(recompute #{advice.seq}, {advice.elapsed_s * 1000:.0f} ms)"
+    )
+    lines = [head]
+    if advice.error:
+        lines.append(f"!! last recompute failed ({advice.error}); showing previous advice")
+    lines.append(f"{'score':>6} {'vorp':>6} {'surv':>5} {'adp':>6} {'tier':>4} {'run':>3}  player")
+    for r in rows[:top]:
+        v = r.value
+        surv = "  n/a" if r.survival is None else f"{r.survival:5.2f}"
+        adp = "     -" if r.adp is None else f"{r.adp:6.1f}"
+        tier = "   -" if r.tier is None else f"{r.tier:4d}"
+        run = f"{'RUN' if r.run else '':>3}"
+        cliff = " CLIFF" if r.cliff else ""
+        score = 0.0 if r.pick_score is None else r.pick_score
+        lines.append(
+            f"{score:6.1f} {v.vorp:6.1f} {surv} {adp} {tier} {run}  "
+            f"{names.get(v.sleeper_id, v.sleeper_id)}{cliff}"
         )
-        self._spec_rules = rules
-        self._spec = DraftSpec.build(rules)
-        self.state = None
-        self.refresh(None)
-
-    def refresh(self, draft_doc: dict | None) -> None:
-        from sqlalchemy import select
-
-        from lazy_sleeper.db.models import Draft, DraftPick
-        from lazy_sleeper.draft.state import DraftSpec, DraftState, resolve_my_slot
-
-        with session_scope(self._ctx.sessions) as s:
-            row = s.get(Draft, self._draft_id)
-            doc = draft_doc or (
-                {"teams": row.teams, "rounds": row.rounds, "type": row.type,
-                 "draft_order": row.draft_order} if row else {}
-            )  # fmt: skip
-            picks = s.execute(
-                select(DraftPick.pick_no, DraftPick.draft_slot, DraftPick.sleeper_id,
-                       DraftPick.metadata_).where(DraftPick.draft_id == self._draft_id)
-            ).all()  # fmt: skip
-        self._spec = DraftSpec.build(self._spec_rules, doc)
-        my_slot = resolve_my_slot(
-            self._ctx.settings.my_draft_slot,
-            doc.get("draft_order"),
-            self._ctx.settings.sleeper_user_id,
-        )
-        st = DraftState(self._spec, my_slot=my_slot, position_of=self._positions.get)
-        st.rebuild(
-            {"pick_no": p[0], "draft_slot": p[1], "sleeper_id": p[2], "metadata_": p[3]}
-            for p in picks
-        )
-        self.state = st
-
-    def on_the_clock(self) -> bool:
-        st = self.state
-        return st.my_slot is not None and st.on_the_clock == st.my_slot
-
-    def advice(self) -> list:  # noqa: ANN201 — list[BoardRow]
-        from lazy_sleeper.draft.signals import advise
-
-        return advise(
-            self._rows, self.state, self._adp, self._cfg,
-            search_rank_by_id=self._search_rank, rank_map=self._rank_map,
-        )  # fmt: skip
-
-    def render(self, position: str | None = None) -> str:
-        st = self.state
-        rows = self.advice()
-        if position:
-            rows = [r for r in rows if r.value.position == position.upper()]
-        until = st.picks_until_my_turn()
-        mine = st.my_roster()
-        head = (
-            f"pick {st.current_pick}/{st.spec.total_picks}  on the clock: slot {st.on_the_clock}  "
-            f"my slot: {st.my_slot or '?'}  until my turn: {'?' if until is None else until}"
-        )
-        needs = (
-            f"my open starters: {mine.open_starters or 'none'}  bench open: {mine.open_bench}"
-            if mine
-            else "my roster: unknown slot"
-        )
-        lines = [
-            head,
-            needs,
-            f"{'score':>6} {'vorp':>6} {'surv':>5} {'adp':>6} {'tier':>4} {'run':>3}  player",
-        ]
-        for r in rows[: self._top]:
-            v = r.value
-            surv = "  n/a" if r.survival is None else f"{r.survival:5.2f}"
-            adp = "     -" if r.adp is None else f"{r.adp:6.1f}"
-            tier = "   -" if r.tier is None else f"{r.tier:4d}"
-            run = f"{'RUN' if r.run else '':>3}"
-            cliff = " CLIFF" if r.cliff else ""
-            lines.append(
-                f"{r.pick_score:6.1f} {v.vorp:6.1f} {surv} {adp} {tier} {run}  "
-                f"{self._names.get(v.sleeper_id, v.sleeper_id)}{cliff}"
-            )
-        return "\n".join(lines)
+    return "\n".join(lines)
 
 
 @draft_app.command("advise")
@@ -1378,7 +1340,13 @@ def draft_advise(
     state from core.draft_picks — run `lazy draft poll` (or `lazy pull picks --load`) first."""
     ctx = _Ctx()
     did = draft_id or ctx.settings.sleeper_draft_id
-    typer.echo(_Adviser(ctx, did, season, top).render(position))
+    engine = _draft_engine(ctx, did, season)
+    mine = engine.state.my_roster()
+    typer.echo(render_advice(engine.latest, dict(engine.board.names), top, position))
+    if mine:
+        typer.echo(
+            f"my open starters: {mine.open_starters or 'none'}  bench open: {mine.open_bench}"
+        )
 
 
 def _draft_log_file(draft_id: str) -> Path:
@@ -1456,25 +1424,44 @@ def draft_poll(
         who = name_of(ev.sleeper_id, ev.metadata)
         typer.echo(f"#{ev.pick_no:3d} R{ev.round}.{ev.draft_slot:<2d} {who}{auto}{tag}")
 
-    adviser = _Adviser(ctx, did, season, top) if advise else None
-
     def on_poll(r) -> None:  # noqa: ANN001
-        if adviser and (r.new or r.poll_seq == 1 or r.removed):
-            adviser.refresh(poller.draft)
-            if adviser.on_the_clock():
-                typer.echo(adviser.render())
         if r.unchanged or r.new:
             return
         typer.echo(f"poll {r.poll_seq}: {r.picks} picks, {r.removed} removed, status {r.status}")
 
     typer.echo(f"polling draft {did} every {interval:g}s, log: {log_path}")
-    summary = poller.run(
-        on_pick,
-        on_poll=on_poll,
-        stop=stop,
-        until_complete=not forever,
-        max_polls=1 if once else None,
-    )
+    if advise:
+        from lazy_sleeper.draft.engine import DraftRunner
+
+        engine = _draft_engine(ctx, did, season)
+        names.update(engine.board.names)
+        shown: set[int] = set()
+
+        def on_advice(a) -> None:  # noqa: ANN001
+            if a.my_turn and (a.pick_no not in shown or a.error):
+                shown.add(a.pick_no)
+                typer.echo(render_advice(a, names, top))
+
+        runner = DraftRunner(
+            poller, engine, reload_rows=lambda: _draft_pick_rows(ctx, did),
+            on_pick=on_pick, on_advice=on_advice, on_poll=on_poll,
+            until_complete=not forever, max_polls=1 if once else None,
+        )  # fmt: skip
+        runner.stop = stop
+        summary = runner.run()
+        t = engine.timing
+        typer.echo(
+            f"recompute: {t.count} runs, avg {t.avg_s * 1000:.0f} ms, max {t.max_s * 1000:.0f} ms, "
+            f"{t.failures} failures"
+        )
+    else:
+        summary = poller.run(
+            on_pick,
+            on_poll=on_poll,
+            stop=stop,
+            until_complete=not forever,
+            max_polls=1 if once else None,
+        )
     exp = poller.expected_picks
     slot = poller.my_slot(me)
     typer.echo(
