@@ -261,6 +261,7 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
+        """Liveness: `{"status": "ok"}`."""
         return {"status": "ok"}
 
     @app.get("/snapshots")
@@ -268,6 +269,8 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         limit: int = 50,
         session: Session = Depends(get_session),  # noqa: B008
     ) -> list[dict[str, Any]]:
+        """Most recent raw snapshots (id, source, kind, season, week, pulled_at, record_count,
+        valid, byte_size) — the data-freshness view."""
         rows = session.scalars(
             select(Snapshot).order_by(Snapshot.pulled_at.desc()).limit(limit)
         ).all()
@@ -316,6 +319,7 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         position: str | None = None,
         session: Session = Depends(get_session),  # noqa: B008
     ) -> dict[str, Any]:
+        """Remove the manual override for one position, or all positions when omitted."""
         repo = WeightRepository(session)
         removed = repo.clear_override(horizon, position.upper() if position else None)
         session.commit()
@@ -449,6 +453,7 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
 
     @app.post("/draft/{draft_id}/stop")
     def draft_stop(draft_id: str) -> dict[str, Any]:
+        """Stop polling this draft (`{draft_id, running}`); 404 if it isn't running."""
         run = host.stop(draft_id)
         if run is None:
             raise _not_running(draft_id)
@@ -537,6 +542,7 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
 
     @app.get("/draft")
     def drafts() -> list[dict[str, Any]]:
+        """Drafts known to this API process: `[{draft_id, running, season}]`."""
         return [
             {"draft_id": did, "running": r.runner.running, "season": r.season}
             for did in host.ids()

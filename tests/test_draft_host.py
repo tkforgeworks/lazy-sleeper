@@ -356,3 +356,22 @@ def test_apply_config_404_until_running_then_restart_rebuilds(
     assert r.json()["restarted"] is True
     host.get(did).runner.join(30)
     assert host.get(did) is not first and host.get(did).engine.state.picks_made == 180
+
+
+# --- API contract export ---------------------------------------------------------------------------
+
+
+def test_committed_api_docs_match_the_app(client: TestClient) -> None:
+    """docs/api/{openapi.json,README.md} are the hand-off contract — regenerate with
+    `lazy api export` whenever a route or model changes."""
+    import json
+
+    from lazy_sleeper.api.export import openapi_dict, to_markdown
+
+    docs = Path(__file__).parent.parent / "docs" / "api"
+    spec = openapi_dict(client.app)
+    assert json.loads((docs / "openapi.json").read_text(encoding="utf-8")) == spec
+    md = to_markdown(spec)
+    assert (docs / "README.md").read_text(encoding="utf-8") == md
+    for path in spec["paths"]:
+        assert f"`{path}`" in md
