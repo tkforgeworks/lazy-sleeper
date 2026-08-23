@@ -50,13 +50,20 @@ ROW_FIELDS = (
 )
 
 
+def _name(names: Mapping[str, str], sleeper_id: str | None) -> str | None:
+    """``BoardContext.names`` holds "Name POS/TEAM"; the surface wants just the name."""
+    if sleeper_id is None:
+        return None
+    label = names.get(sleeper_id)
+    return label.rsplit(" ", 1)[0] if label else sleeper_id
+
+
 def row_dict(rank: int, r: BoardRow, names: Mapping[str, str]) -> dict[str, Any]:
     v = r.value
-    name = names.get(v.sleeper_id)
     return {
         "rank": rank,
         "sleeper_id": v.sleeper_id,
-        "name": name.rsplit(" ", 1)[0] if name else v.sleeper_id,  # "Name POS/TEAM" → "Name"
+        "name": _name(names, v.sleeper_id),
         "position": v.position,
         "team": v.team,
         "points": v.points,
@@ -85,7 +92,7 @@ def roster_dict(roster: TeamRoster | None, names: Mapping[str, str]) -> dict[str
             {
                 "pick_no": s.pick_no,
                 "sleeper_id": s.sleeper_id,
-                "name": names.get(s.sleeper_id or "", s.sleeper_id),
+                "name": _name(names, s.sleeper_id),
                 "position": s.position,
                 "seat": s.seat,
             }

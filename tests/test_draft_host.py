@@ -222,3 +222,39 @@ def test_api_state_mid_draft_has_rows_and_is_documented(
     assert {"clock", "my_roster", "recompute", "rows"} <= set(
         schemas["DraftStateOut"]["properties"]
     )
+
+
+# --- HTML fallback (LS-37) ---------------------------------------------------------------------
+
+
+def test_draft_page_is_self_contained_and_targets_the_state_endpoint(fx: ReplayFixture) -> None:
+    from lazy_sleeper.draft.render import POSITIONS, draft_page
+
+    html = draft_page('x"<id>', season=2026, limit=25, refresh_s=3)
+    assert (
+        html.startswith("<!doctype html>")
+        and "<script src" not in html
+        and "http" not in html.split("<style>")[0]
+    )
+    assert 'const DID="x\\"<id>"' in html  # json-encoded draft id inside the script
+    assert (
+        "LIMIT=25,EVERY=3000" in html
+        and "/draft/${DID}/state" in html
+        and "/draft/${DID}/start" in html
+    )
+    assert "x&quot;&lt;id&gt;" in html  # escaped in the title/header
+    assert all(f'data-pos="{p}"' in html for p in POSITIONS) and 'data-pos="ALL"' in html
+    assert "name='viewport'" in html and "/board.html?season=2026" in html
+
+
+def test_api_serves_the_fallback_page_for_any_draft_and_the_configured_one(
+    client: TestClient, fx: ReplayFixture
+) -> None:
+    r = client.get(f"/draft/{fx.draft_id}/state.html", params={"limit": 12, "refresh": 2})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert f'const DID="{fx.draft_id}"' in r.text and "LIMIT=12,EVERY=2000" in r.text
+    r = client.get("/draft.html")
+    assert r.status_code == 200 and 'const DID="1392685476523024384"' in r.text  # Settings default
+    assert (
+        client.get(f"/draft/{fx.draft_id}/state.html", params={"refresh": 0.1}).status_code == 422
+    )
