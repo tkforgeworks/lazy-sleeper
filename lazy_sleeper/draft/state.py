@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from lazy_sleeper.board.baselines import RosterShape
@@ -267,6 +268,11 @@ class DraftState:
         self._rosters[slot] = roster
 
     # -- order -----------------------------------------------------------------------
+    @property
+    def picks(self) -> Mapping[int, tuple[int | None, str | None, str | None]]:
+        """pick_no → (slot, sleeper_id, position) for every seated pick (read-only view)."""
+        return MappingProxyType(self._picks)
+
     @property
     def picks_made(self) -> int:
         return len(self._picks)
