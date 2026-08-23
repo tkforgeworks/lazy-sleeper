@@ -345,9 +345,55 @@ tables (upsert, re-runnable as often as the draft-night poller likes):
 | `core.rosters` | `league_id, roster_id` | `owner_id` → `league_users`; `players` / `starters` / `reserve` / `taxi` / `keepers` as JSONB lists |
 | `core.league_users` | `league_id, user_id` | `display_name`, `team_name` (from metadata), `is_owner` (commissioner) |
 
-Rehearsal: join a Sleeper mock draft, then `lazy pull picks --draft-id <its id> --load` on a loop — the
-loader, sync/undo handling and `first_seen_at` get exercised on real pick payloads before 2026-09-04.
-Draft state is not part of the daily workflow; it's polled on draft night.
+Draft state is not part of the daily workflow; it's polled on draft night (below).
+
+## Draft night — the live companion (E6) and how to rehearse it
+
+The loop is **poller → state → recompute → `/draft/{id}/state` → page**, all inside the API process
+(`DraftHost`, one runner per draft on a daemon thread). Board + ADP + rank map are built once when the
+runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-23 mock: 118 polls,
+2 s cadence, recompute avg 49 ms.
+
+### Procedure (mock or the real thing)
+
+1. Fresh data: the daily pull has run (or `lazy pull projections 2026 && lazy pull adp 2026`), and
+   `lazy board regen` shows a sane `/board.html`. Check the dials on `/board/config.html`.
+2. Start the API — **not** with `--reload` (the runner lives in the process):
+   `uv run uvicorn lazy_sleeper.api.app:app --host 0.0.0.0 --port 8000`
+3. Find the draft id (Sleeper room URL `sleeper.com/draft/nfl/<id>`; the real one is
+   `SLEEPER_DRAFT_ID` in `.env`, so `/draft.html` needs no id). Open
+   `http://<host>:8000/draft/<id>/state.html` on the second monitor and/or phone.
+4. Press **start draft runner** *before* the room starts drafting. The status line shows
+   `recompute #n … poll 2s`; the clock strip shows your slot once Sleeper assigns `draft_order`
+   (on mocks it can land mid-draft — the page picks it up; set `MY_DRAFT_SLOT` in `.env` and restart
+   the API if it stays `?`).
+5. Draft. **YOU ARE ON THE CLOCK** in yellow = your turn; top row is the recommendation
+   (`score` = VORP − what you'd lose by waiting + need bonus; `surv` = chance he survives to your next
+   pick; `RUN n` / `CLIFF` tags). Position buttons filter. Tune mid-draft from the **tuning** link:
+   unstarred dials apply instantly, starred ones need the restart button (board rebuild, state restored
+   from `core.draft_picks`).
+6. If the API dies: restart it, press start again — state comes back from the database. If the
+   page dies: `lazy draft advise` in a terminal is the same engine one-shot, `lazy draft poll --advise`
+   the same loop without a browser.
+7. Afterwards: `lazy draft fixture --draft-id <id> --since <UTC start>` writes
+   `tests/fixtures/mock_draft_<id>.json.gz` — the night as an offline replay (below).
+
+### Offline replay (CI / regression)
+
+A fixture = the final pick list + every poll's pick count (`ReplayFixture`). `ReplaySource` replays it
+through the real poller/engine with no network or DB; `tests/test_draft_poller.py` and
+`tests/test_draft_host.py` run both recorded mocks (2026-08-20 slot 8 / 2026-08-23 slot 8) end-to-end
+on every CI run, and `test_full_draft_recompute_is_fast` holds the recompute under the LS-34 bound.
+Polls that aren't a prefix of the final list (a commissioner undo) are reported and dropped by the
+builder — the format stores one pick list.
+
+| Surface | What |
+|---|---|
+| `GET /draft/{id}/state.html`, `GET /draft.html` | the page (`?limit=&refresh=&interval=`) |
+| `GET /draft/{id}/state?position=&limit=` | the decision document (typed in `/openapi.json`) |
+| `POST /draft/{id}/start` `{season, interval_s, forever}` / `stop` | runner lifecycle |
+| `GET /board/config.html`, `PUT /board/config`, `POST /draft/{id}/config?restart=` | tuning |
+| `lazy draft poll --advise`, `lazy draft advise`, `lazy draft fixture` | the CLI equivalents |
 
 ## Layout
 

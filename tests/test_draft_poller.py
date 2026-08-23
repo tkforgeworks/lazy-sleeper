@@ -229,6 +229,15 @@ def test_on_pick_exception_does_not_kill_the_loop(fx: ReplayFixture) -> None:
 # --- replay source ------------------------------------------------------------
 
 
+@pytest.mark.parametrize("name", ["1396298350046760960", "1397325850717749248"])
+def test_every_recorded_mock_replays_cleanly(name: str) -> None:
+    fx = ReplayFixture.load(FIXTURE.with_name(f"mock_draft_{name}.json.gz"))
+    p, sink, _ = _poller(fx, ReplaySource(fx))
+    summary = p.run()
+    assert summary.complete and summary.events == 180 and summary.failures == 0
+    assert len(sink.rows) == 180 and p.expected_picks == 180
+
+
 def test_replay_source_reports_drafting_until_exhausted(fx: ReplayFixture) -> None:
     src = ReplaySource(fx, counts=[40])
     assert json.loads(src.draft())["status"] == "drafting"

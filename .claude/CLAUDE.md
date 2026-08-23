@@ -13,14 +13,25 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-23 — refresh this block whenever a story merges)
 
-- **Done:** LS-10–15, 17–35, 37 (PRs #1–#28). 226 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
+- **Done:** LS-10–15, 17–37 (PRs #1–#30). 234 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-36.** Third mock `1397325850717749248` (2026-08-23, Tim slot 8) ran live through the API +
-  fallback page end-to-end: 133 polls, 180 picks, page verified in a real browser. Feedback: advice
-  felt late on the clock → poll/refresh cut to 2 s (PR #29). Still to do for LS-36: turn that mock's
-  snapshots into a second replay fixture + document the rehearsal procedure. Tim will tune signal
-  weights via more mocks once dials are adjustable from the app (not CLI). Then LS-38 Tailscale, LS-39
-  Flutter view.
+- **Next up: LS-38** (Tailscale for draft night), then LS-39 Flutter read-only view; M5 ForgeModel
+  only if time remains. Tim will tune signal weights through more mocks via `/board/config.html`.
+- **Rehearsal (LS-36, PR #30):** three mocks recorded — `1396298350046760960` (8/20, slot 8),
+  `1396601438095835136` (8/21, slot 9, CLI poll only), **`1397325850717749248` (8/23, slot 8, the
+  first end-to-end run through API + fallback page, 118 polls)**. `lazy draft fixture --draft-id …
+  [--since UTC]` (`draft/fixture.py::build_fixture`) rebuilds a `ReplayFixture` from
+  `raw.snapshots` (final picks, metadata trimmed, + per-poll counts; non-prefix polls = undo are
+  reported and dropped; status forced to `complete` when picks = rounds×teams because Sleeper's doc
+  flips late). Both 8/20 and 8/23 fixtures replay end-to-end in CI (`test_every_recorded_mock_
+  replays_cleanly`, `test_second_fixture_replays_through_the_runner`). README §"Draft night" is the
+  procedure. **Tuning page:** `GET /board/config.html?draft_id=` (`draft/render.py::config_page`,
+  `DIALS` must equal `board.config.FIELDS` — tested) → `PUT /board/config`, then **`POST
+  /draft/{id}/config`** = `DraftEngine.set_config(cfg)` (signal dials, instant recompute) or
+  `?restart=true` = `DraftHost.restart` (stop + start: board rebuild under the new tiers/cliff/flag/
+  stream_depth dials, state restored from the DB). Linked from the draft page header. Gotcha seen
+  twice: killing the `uv run uvicorn` wrapper leaves the python child serving stale code on the
+  port — kill by port (`Get-NetTCPConnection -LocalPort`).
 - **HTML fallback (LS-37, `draft/render.py`):** `draft_page(draft_id, season=, limit=40,
   refresh_s=5)` = one self-contained page (inline CSS/JS, no build, dark like `/board.html`) whose
   script polls `GET /draft/{id}/state` every `refresh` s (default **2**) and redraws only when `recompute.seq` changes: clock strip (pick/round, on

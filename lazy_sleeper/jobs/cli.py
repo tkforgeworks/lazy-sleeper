@@ -1294,6 +1294,39 @@ def render_advice(  # noqa: ANN001
     return "\n".join(lines)
 
 
+@draft_app.command("fixture")
+def draft_fixture(
+    draft_id: Annotated[
+        str | None, typer.Option(help="Draft whose polls to replay (default: configured)")
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Output .json.gz (default tests/fixtures/mock_draft_<id>.json.gz)"),
+    ] = None,
+    since: Annotated[
+        datetime | None, typer.Option(help="Only snapshots pulled at/after this UTC time")
+    ] = None,
+    until: Annotated[
+        datetime | None, typer.Option(help="Only snapshots pulled at/before this UTC time")
+    ] = None,
+) -> None:
+    """Build the offline replay fixture for a polled draft from raw.snapshots (LS-36): the final
+    pick list + every poll's pick count, in the shape `ReplaySource` replays."""
+    from lazy_sleeper.draft.fixture import build_fixture, summarize
+
+    ctx = _Ctx()
+    did = draft_id or ctx.settings.sleeper_draft_id
+    with session_scope(ctx.sessions) as s:
+        b = build_fixture(s, ctx.store, did, since=since, until=until)
+    for line in summarize(b):
+        typer.echo(line)
+    for d in b.dropped[:5]:
+        typer.echo(f"  dropped non-prefix poll snapshot={d['snapshot_id']} count={d['count']}")
+    path = out or Path("tests/fixtures") / f"mock_draft_{did}.json.gz"
+    size = b.write(path)
+    typer.echo(f"wrote {path} ({size / 1024:.1f} KB)")
+
+
 @draft_app.command("advise")
 def draft_advise(
     draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),

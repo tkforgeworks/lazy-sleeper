@@ -136,7 +136,8 @@ def draft_page(
         "<header>"
         f"<h1>Lazy Sleeper — live draft <small>{did} · "
         f'<a href="/board.html?season={int(season)}">pre-draft board</a> · '
-        f'<a href="/draft/{did}/state">json</a></small></h1>'
+        f'<a href="/draft/{did}/state">json</a> · '
+        f'<a href="/board/config.html?draft_id={did}">tuning</a></small></h1>'
         '<div class="clock" id="clock">loading…</div>'
         '<div class="needs" id="needs"></div>'
         f'<div class="filters">{buttons} '
@@ -152,4 +153,108 @@ def draft_page(
     )
 
 
-__all__ = ["POSITIONS", "draft_page"]
+# --- tuning page ---------------------------------------------------------------------------------
+
+# (field, label, help) — order is the page order; types come from the live /board/config values
+DIALS: tuple[tuple[str, str, str], ...] = (
+    ("need_bonus", "need bonus", "pick_score pts per unit of my positional need (LS-33)"),
+    ("survival_sigma_min", "survival σ floor", "picks of ADP scatter, minimum"),
+    ("survival_sigma_pct", "survival σ %", "…or this fraction of ADP, whichever is larger"),
+    ("demand_shift", "demand shift", "window stretch per unit of relative positional demand"),
+    ("run_window", "run window", "picks looked back for a position run"),
+    ("run_threshold", "run threshold", "run when this many in the window share a position"),
+    ("run_streak", "run streak", "…or this many consecutive most-recent picks do"),
+    ("late_rounds", "late rounds", "K/DEF need bonus only in the last N rounds (0 = always)"),
+    ("cliff_gap", "cliff gap *", "season pts drop to the next player → CLIFF"),
+    ("gap_multiplier", "tier gap ×*", "tier break at this multiple of the position's median gap"),
+    ("min_gap", "tier min gap *", "…but never on a drop smaller than this"),
+    ("adp_min_delta", "ADP Δ floor *", "|ADP − rank| floor for a value/reach flag"),
+    ("adp_pct", "ADP Δ % *", "…or this fraction of ADP, whichever is larger"),
+    ("disagree_min_pts", "disagree pts *", "provider spread floor for a disagreement flag"),
+    ("disagree_pct", "disagree % *", "…or this fraction of blended points"),
+    ("debias_disagreement", "debias *", "remove each provider's position bias before comparing"),
+    ("stream_depth", "stream depth *", "K/DEF replacement rank (0 = last starter)"),
+)
+LIVE_DIALS = frozenset(d[0] for d in DIALS if not d[1].endswith("*"))
+
+_CFG_CSS = (
+    _CSS
+    + """
+main{padding:12px 14px;max-width:720px}form{display:grid;grid-template-columns:1fr auto;gap:6px 12px;
+ align-items:center}label{display:flex;flex-direction:column}label small{font-size:11px}
+input[type=number]{width:7em;padding:4px;background:#222;color:#eee;border:1px solid #444;border-radius:4px}
+.actions{margin:12px 0;display:flex;flex-wrap:wrap;gap:8px}.actions button{padding:6px 12px}
+.note{font-size:12px;color:#999}.ok{color:#86efac}
+"""
+)
+
+_CFG_JS = """
+const DID=__DID__,LIVE=new Set(__LIVE__);
+const $=s=>document.querySelector(s);
+function setStatus(t,err){const e=$('#status');e.textContent=t;e.classList.toggle('err',!!err);e.classList.toggle('ok',!err);}
+async function load(){
+ const r=await fetch('/board/config',{cache:'no-store'});if(!r.ok){setStatus('load failed: HTTP '+r.status,true);return;}
+ const c=await r.json();
+ for(const [k,v] of Object.entries(c)){const el=document.querySelector(`[name="${k}"]`);if(!el)continue;
+  if(el.type==='checkbox')el.checked=!!v;else el.value=v;}
+ setStatus('loaded · updated '+(c.updated_at||'?'));
+}
+function body(){const b={};for(const el of document.querySelectorAll('[name]')){
+ if(el.type==='checkbox')b[el.name]=el.checked;else if(el.value!=='')b[el.name]=Number(el.value);}return b;}
+async function save(){
+ const r=await fetch('/board/config',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body())});
+ if(!r.ok){setStatus('save failed: HTTP '+r.status+' '+(await r.text()).slice(0,200),true);return false;}
+ setStatus('saved');return true;
+}
+async function apply(restart){
+ if(!await save())return;
+ const r=await fetch(`/draft/${DID}/config?restart=${restart}`,{method:'POST'});
+ if(r.status===404){setStatus('saved; draft '+DID+' is not running (start it from the draft page)',true);return;}
+ if(!r.ok){setStatus('apply failed: HTTP '+r.status,true);return;}
+ const j=await r.json();setStatus((restart?'restarted, board rebuilt':'applied live')+' · recompute #'+j.recompute_seq+(j.error?' · ERROR '+j.error:''),!!j.error);
+}
+$('#save').onclick=save;$('#apply').onclick=()=>apply(false);$('#restart').onclick=()=>apply(true);
+$('#reload').onclick=load;load();
+"""
+
+
+def config_page(draft_id: str) -> str:
+    """The tuning page: one form over ``board_config``. Dials marked * are baked into the board
+    at build time and need the **restart** button; the rest apply to the running draft instantly."""
+    did = escape(draft_id)
+    rows = []
+    for name, label, help_ in DIALS:
+        if name == "debias_disagreement":
+            inp = f'<input type="checkbox" name="{name}">'
+        elif name in ("run_window", "run_threshold", "run_streak", "late_rounds", "stream_depth"):
+            inp = f'<input type="number" name="{name}" step="1" min="0">'
+        else:
+            inp = f'<input type="number" name="{name}" step="any" min="0">'
+        rows.append(f"<label>{escape(label)}<small>{escape(help_)}</small></label>{inp}")
+    js = _CFG_JS.replace("__DID__", json.dumps(draft_id)).replace(
+        "__LIVE__", json.dumps(sorted(LIVE_DIALS))
+    )
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>Lazy Sleeper tuning</title><style>{_CFG_CSS}</style></head><body>"
+        f"<header><h1>Lazy Sleeper — tuning <small>draft {did} · "
+        f'<a href="/draft/{did}/state.html">draft page</a> · <a href="/board/config">json</a>'
+        "</small></h1>"
+        '<div class="status" id="status">loading…</div></header>'
+        f'<main><form onsubmit="return false">{"".join(rows)}</form>'
+        '<div class="actions">'
+        '<button id="save">save</button>'
+        '<button id="apply" class="start">save + apply to live draft</button>'
+        '<button id="restart">save + restart draft runner (rebuild board)</button>'
+        '<button id="reload">reload</button></div>'
+        '<p class="note">Unstarred dials change survival / runs / need bonus and take effect on the '
+        "next recompute. Starred (*) dials are baked into the board rows (tiers, cliffs, ADP and "
+        "disagreement flags, K/DEF stream depth) — use <b>restart</b>: it rebuilds the board (a few "
+        "seconds) and restores the draft state from the database. Settings persist in "
+        "<code>derived.board_config</code> and also steer <code>lazy board regen</code>.</p></main>"
+        f"<script>{js}</script></body></html>"
+    )
+
+
+__all__ = ["DIALS", "LIVE_DIALS", "POSITIONS", "config_page", "draft_page"]

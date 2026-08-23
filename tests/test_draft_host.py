@@ -260,3 +260,99 @@ def test_api_serves_the_fallback_page_for_any_draft_and_the_configured_one(
     assert (
         client.get(f"/draft/{fx.draft_id}/state.html", params={"refresh": 0.1}).status_code == 422
     )
+
+
+# --- LS-36: second replay fixture (2026-08-23 mock) + fixture builder ------------------------------
+
+FIXTURE_2 = Path(__file__).parent / "fixtures" / "mock_draft_1397325850717749248.json.gz"
+
+
+def test_second_fixture_is_the_recorded_0823_mock() -> None:
+    from lazy_sleeper.draft.fixture import FixtureBuild
+
+    fx2 = ReplayFixture.load(FIXTURE_2)
+    assert fx2.draft_id == "1397325850717749248" and len(fx2.picks) == 180
+    assert fx2.draft["status"] == "complete" and fx2.draft["draft_order"] == {ME: 8}
+    counts = [p["count"] for p in fx2.polls]
+    assert len(counts) == 118 and counts[0] == 7 and counts[-1] == 180
+    assert counts == sorted(counts)  # every poll was a prefix of the next
+    assert set(fx2.picks[0]["metadata"]) <= {
+        "first_name",
+        "last_name",
+        "position",
+        "team",
+        "player_id",
+    }
+    # round-trips through the builder's writer unchanged
+    b = FixtureBuild(fx2.draft, fx2.polls, fx2.picks)
+    assert b.as_dict() == {"draft": fx2.draft, "polls": fx2.polls, "picks": fx2.picks}
+
+
+def test_fixture_builder_prefix_rule_and_trim() -> None:
+    from lazy_sleeper.draft.fixture import _is_prefix, _trim_pick
+
+    a = [{"pick_no": 1, "player_id": "x"}, {"pick_no": 2, "player_id": "y"}]
+    assert _is_prefix(a[:1], a) and _is_prefix(a, a) and not _is_prefix(a, a[:1])
+    assert not _is_prefix([{"pick_no": 1, "player_id": "z"}], a)  # undo + different pick
+    t = _trim_pick({"pick_no": 3, "player_id": "p", "reactions": None, "metadata": {"first_name": "A",
+                    "injury_status": "Q", "position": "RB"}})  # fmt: skip
+    assert t["metadata"] == {"first_name": "A", "position": "RB"} and "reactions" not in t
+
+
+def test_second_fixture_replays_through_the_runner() -> None:
+    fx2 = ReplayFixture.load(FIXTURE_2)
+    from tests.test_draft_engine import _runner
+
+    runner, seen = _runner(fx2)
+    summary = runner.run()
+    assert summary.complete and summary.events == 180 and summary.failures == 0
+    st = runner.engine.state
+    assert st.my_slot == 8 and st.complete and len(st.my_roster().picks) == 15
+    turns = [a for a in seen if a.my_turn]
+    assert len(turns) >= 14  # advice was published for (nearly) every one of my 15 turns
+    assert runner.engine.timing.max_s < 1.0
+
+
+# --- tuning: set_config + page + routes -------------------------------------------------------
+
+
+def test_set_config_changes_signal_dials_and_recomputes(fx: ReplayFixture) -> None:
+    from dataclasses import replace
+
+    from lazy_sleeper.board.tiers import TierConfig
+
+    eng = _engine(fx, picks=20)
+    before = eng.latest
+    adv = eng.set_config(replace(TierConfig(), need_bonus=0.0, run_threshold=1))
+    assert adv.seq == before.seq + 1 and eng.board.cfg.need_bonus == 0.0
+    # no need bonus → pick_score == vorp − option value, i.e. never above vorp
+    assert all(r.pick_score <= r.value.vorp + 1e-9 for r in adv.rows)
+    assert any(r.run for r in adv.rows)  # threshold 1 → the last pick's position is "a run"
+
+
+def test_tuning_page_lists_every_dial(client: TestClient, fx: ReplayFixture) -> None:
+    from lazy_sleeper.board.config import FIELDS
+    from lazy_sleeper.draft.render import DIALS
+
+    assert {d[0] for d in DIALS} == set(FIELDS)  # the page and the repo agree on the dials
+    r = client.get("/board/config.html", params={"draft_id": fx.draft_id})
+    assert r.status_code == 200 and all(f'name="{f}"' in r.text for f in FIELDS)
+    assert f'const DID="{fx.draft_id}"' in r.text and "/board/config" in r.text
+    assert "<script src" not in r.text
+    r = client.get("/board/config.html")
+    assert 'const DID="1392685476523024384"' in r.text
+
+
+def test_apply_config_404_until_running_then_restart_rebuilds(
+    client: TestClient, fx: ReplayFixture
+) -> None:
+    did = fx.draft_id
+    assert client.post(f"/draft/{did}/config").status_code == 404
+    host = client.app.state.draft_host
+    host.start(did, 2026).runner.join(30)
+    first = host.get(did)
+    r = client.post(f"/draft/{did}/config", params={"restart": "true"})
+    assert r.status_code == 200, r.text
+    assert r.json()["restarted"] is True
+    host.get(did).runner.join(30)
+    assert host.get(did) is not first and host.get(did).engine.state.picks_made == 180
