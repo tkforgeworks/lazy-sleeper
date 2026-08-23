@@ -61,6 +61,8 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 pull_app = typer.Typer(no_args_is_help=True)
 load_app = typer.Typer(no_args_is_help=True)
 db_app = typer.Typer(no_args_is_help=True)
+api_app = typer.Typer(no_args_is_help=True)
+app.add_typer(api_app, name="api", help="API contract export")
 app.add_typer(pull_app, name="pull", help="Fetch external data into dated snapshots")
 app.add_typer(load_app, name="load", help="Load latest snapshots into core tables")
 app.add_typer(db_app, name="db", help="Database migrations")
@@ -1470,3 +1472,18 @@ def draft_poll(
         + (f" ({exp} expected)" if exp else "")
         + (" [stopped]" if summary.stopped else "")
     )
+
+
+@api_app.command("export")
+def api_export(
+    out: Annotated[Path, typer.Option(help="Directory for openapi.json + README.md")] = Path(
+        "docs/api"
+    ),
+) -> None:
+    """Write the API contract for hand-off: docs/api/openapi.json (client generators) and
+    docs/api/README.md (endpoint table + schemas). Builds the app without touching the DB."""
+    from lazy_sleeper.api.app import create_app
+    from lazy_sleeper.api.export import export
+
+    j, m = export(create_app(get_settings()), out)
+    typer.echo(f"wrote {j} and {m}")

@@ -1,0 +1,2035 @@
+{
+  "components": {
+    "schemas": {
+      "BoardConfigBody": {
+        "properties": {
+          "adp_min_delta": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adp Min Delta"
+          },
+          "adp_pct": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adp Pct"
+          },
+          "cliff_gap": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cliff Gap"
+          },
+          "debias_disagreement": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Debias Disagreement"
+          },
+          "demand_shift": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Demand Shift"
+          },
+          "disagree_min_pts": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disagree Min Pts"
+          },
+          "disagree_pct": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disagree Pct"
+          },
+          "gap_multiplier": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap Multiplier"
+          },
+          "late_rounds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Late Rounds"
+          },
+          "min_gap": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Gap"
+          },
+          "need_bonus": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Need Bonus"
+          },
+          "run_streak": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Streak"
+          },
+          "run_threshold": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Threshold"
+          },
+          "run_window": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Window"
+          },
+          "stream_depth": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Depth"
+          },
+          "survival_sigma_min": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Survival Sigma Min"
+          },
+          "survival_sigma_pct": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Survival Sigma Pct"
+          }
+        },
+        "title": "BoardConfigBody",
+        "type": "object"
+      },
+      "BoardMetaOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "integer"
+          },
+          "built_at": {
+            "format": "date-time",
+            "title": "Built At",
+            "type": "string"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "season": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Season"
+          }
+        },
+        "required": [
+          "built_at",
+          "season",
+          "rows",
+          "available"
+        ],
+        "title": "BoardMetaOut",
+        "type": "object"
+      },
+      "ConfigBody": {
+        "properties": {
+          "latest": {
+            "default": false,
+            "title": "Latest",
+            "type": "boolean"
+          },
+          "use_overrides": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Overrides"
+          },
+          "weights_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weights Version"
+          }
+        },
+        "title": "ConfigBody",
+        "type": "object"
+      },
+      "DraftClockOut": {
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "current_pick": {
+            "title": "Current Pick",
+            "type": "integer"
+          },
+          "my_next_pick": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Next Pick"
+          },
+          "my_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Slot"
+          },
+          "my_turn": {
+            "title": "My Turn",
+            "type": "boolean"
+          },
+          "on_the_clock": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On The Clock"
+          },
+          "picks_made": {
+            "title": "Picks Made",
+            "type": "integer"
+          },
+          "picks_until_my_turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Picks Until My Turn"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round"
+          }
+        },
+        "required": [
+          "current_pick",
+          "round",
+          "on_the_clock",
+          "my_slot",
+          "my_turn",
+          "my_next_pick",
+          "picks_until_my_turn",
+          "picks_made",
+          "complete"
+        ],
+        "title": "DraftClockOut",
+        "type": "object"
+      },
+      "DraftRowOut": {
+        "description": "One available player, best pick first (``rank`` = overall pick_score order).",
+        "properties": {
+          "adp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adp"
+          },
+          "adp_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adp Delta"
+          },
+          "adp_flag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adp Flag"
+          },
+          "cliff": {
+            "title": "Cliff",
+            "type": "boolean"
+          },
+          "disagree": {
+            "title": "Disagree",
+            "type": "boolean"
+          },
+          "gap_to_next": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap To Next"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pick_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pick Score"
+          },
+          "points": {
+            "title": "Points",
+            "type": "number"
+          },
+          "pos_rank": {
+            "title": "Pos Rank",
+            "type": "integer"
+          },
+          "position": {
+            "title": "Position",
+            "type": "string"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "run": {
+            "title": "Run",
+            "type": "boolean"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "sleeper_id": {
+            "title": "Sleeper Id",
+            "type": "string"
+          },
+          "survival": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Survival"
+          },
+          "team": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          },
+          "vorp": {
+            "title": "Vorp",
+            "type": "number"
+          }
+        },
+        "required": [
+          "rank",
+          "sleeper_id",
+          "name",
+          "position",
+          "team",
+          "points",
+          "vorp",
+          "pos_rank",
+          "tier",
+          "cliff",
+          "gap_to_next",
+          "adp",
+          "adp_delta",
+          "adp_flag",
+          "disagree",
+          "survival",
+          "run",
+          "run_count",
+          "pick_score"
+        ],
+        "title": "DraftRowOut",
+        "type": "object"
+      },
+      "DraftSpecOut": {
+        "properties": {
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "teams": {
+            "title": "Teams",
+            "type": "integer"
+          },
+          "total_picks": {
+            "title": "Total Picks",
+            "type": "integer"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "teams",
+          "rounds",
+          "type",
+          "total_picks"
+        ],
+        "title": "DraftSpecOut",
+        "type": "object"
+      },
+      "DraftStartBody": {
+        "properties": {
+          "forever": {
+            "default": false,
+            "title": "Forever",
+            "type": "boolean"
+          },
+          "interval_s": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 0.5,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval S"
+          },
+          "season": {
+            "default": 2026,
+            "title": "Season",
+            "type": "integer"
+          }
+        },
+        "title": "DraftStartBody",
+        "type": "object"
+      },
+      "DraftStartOut": {
+        "properties": {
+          "already_running": {
+            "title": "Already Running",
+            "type": "boolean"
+          },
+          "board_rows": {
+            "title": "Board Rows",
+            "type": "integer"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "my_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "My Slot"
+          },
+          "picks_made": {
+            "title": "Picks Made",
+            "type": "integer"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "season": {
+            "title": "Season",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "draft_id",
+          "season",
+          "running",
+          "started_at",
+          "already_running",
+          "my_slot",
+          "picks_made",
+          "board_rows"
+        ],
+        "title": "DraftStartOut",
+        "type": "object"
+      },
+      "DraftStateOut": {
+        "description": "The decision surface: who's on the clock, my roster and needs, and the available board\nordered by pick_score with tier / cliff / run / survival \u2014 from the latest recompute.",
+        "properties": {
+          "board": {
+            "$ref": "#/components/schemas/BoardMetaOut"
+          },
+          "clock": {
+            "$ref": "#/components/schemas/DraftClockOut"
+          },
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "my_roster": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RosterOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "poller": {
+            "$ref": "#/components/schemas/PollerOut"
+          },
+          "recompute": {
+            "$ref": "#/components/schemas/RecomputeOut"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/DraftRowOut"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/DraftSpecOut"
+          }
+        },
+        "required": [
+          "draft_id",
+          "spec",
+          "clock",
+          "my_roster",
+          "recompute",
+          "board",
+          "poller",
+          "running",
+          "rows"
+        ],
+        "title": "DraftStateOut",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "OverrideBody": {
+        "properties": {
+          "horizon": {
+            "pattern": "^(season|weekly)$",
+            "title": "Horizon",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "position": {
+            "maxLength": 8,
+            "minLength": 1,
+            "title": "Position",
+            "type": "string"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "horizon",
+          "position",
+          "weights"
+        ],
+        "title": "OverrideBody",
+        "type": "object"
+      },
+      "PollerOut": {
+        "properties": {
+          "expected_picks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Picks"
+          },
+          "interval_s": {
+            "title": "Interval S",
+            "type": "number"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "interval_s",
+          "status",
+          "expected_picks",
+          "started_at",
+          "summary"
+        ],
+        "title": "PollerOut",
+        "type": "object"
+      },
+      "RecomputeOut": {
+        "properties": {
+          "avg_ms": {
+            "title": "Avg Ms",
+            "type": "number"
+          },
+          "computed_at": {
+            "format": "date-time",
+            "title": "Computed At",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "elapsed_ms": {
+            "title": "Elapsed Ms",
+            "type": "number"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "max_ms": {
+            "title": "Max Ms",
+            "type": "number"
+          },
+          "pick_no": {
+            "title": "Pick No",
+            "type": "integer"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "stale": {
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "seq",
+          "pick_no",
+          "computed_at",
+          "elapsed_ms",
+          "stale",
+          "error",
+          "count",
+          "avg_ms",
+          "max_ms",
+          "failures"
+        ],
+        "title": "RecomputeOut",
+        "type": "object"
+      },
+      "RegenBody": {
+        "properties": {
+          "baseline": {
+            "default": "live",
+            "pattern": "^(live|historical)$",
+            "title": "Baseline",
+            "type": "string"
+          },
+          "provider": {
+            "default": "ensemble",
+            "pattern": "^(sleeper|espn|ensemble)$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "season": {
+            "default": 2026,
+            "title": "Season",
+            "type": "integer"
+          }
+        },
+        "title": "RegenBody",
+        "type": "object"
+      },
+      "RosterOut": {
+        "properties": {
+          "counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "object"
+          },
+          "needs": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Needs",
+            "type": "object"
+          },
+          "open_bench": {
+            "title": "Open Bench",
+            "type": "integer"
+          },
+          "open_flex": {
+            "title": "Open Flex",
+            "type": "integer"
+          },
+          "open_starters": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Open Starters",
+            "type": "object"
+          },
+          "picks": {
+            "items": {
+              "$ref": "#/components/schemas/SeatedOut"
+            },
+            "title": "Picks",
+            "type": "array"
+          },
+          "slot": {
+            "title": "Slot",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slot",
+          "picks",
+          "counts",
+          "open_starters",
+          "open_flex",
+          "open_bench",
+          "needs"
+        ],
+        "title": "RosterOut",
+        "type": "object"
+      },
+      "SeatedOut": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pick_no": {
+            "title": "Pick No",
+            "type": "integer"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "seat": {
+            "title": "Seat",
+            "type": "string"
+          },
+          "sleeper_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sleeper Id"
+          }
+        },
+        "required": [
+          "pick_no",
+          "sleeper_id",
+          "name",
+          "position",
+          "seat"
+        ],
+        "title": "SeatedOut",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Lazy Sleeper API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/board": {
+      "get": {
+        "description": "The latest persisted board: ranked rows with points, VORP, tier/cliff, ADP delta,\ndisagreement spread/flag and injury status. `position` filters; `rank` stays overall.",
+        "operationId": "board_board_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "season",
+            "required": false,
+            "schema": {
+              "default": 2026,
+              "title": "Season",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "default": "ensemble",
+              "pattern": "^(sleeper|espn|ensemble)$",
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "position",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 8,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Position"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Board Board Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Board"
+      }
+    },
+    "/board.html": {
+      "get": {
+        "description": "Self-contained HTML view of the latest board \u2014 the draft-night fallback.",
+        "operationId": "board_html_board_html_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "season",
+            "required": false,
+            "schema": {
+              "default": 2026,
+              "title": "Season",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "default": "ensemble",
+              "pattern": "^(sleeper|espn|ensemble)$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Board Html"
+      }
+    },
+    "/board/config": {
+      "get": {
+        "description": "Tier/cliff/flag thresholds in force (defaults seeded by migrations 0006/0007).",
+        "operationId": "board_config_board_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Board Config Board Config Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Board Config"
+      },
+      "put": {
+        "description": "Adjust any subset of the tier/cliff/flag thresholds (draft-day dial).",
+        "operationId": "put_board_config_board_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardConfigBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Board Config Board Config Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Board Config"
+      }
+    },
+    "/board/config.html": {
+      "get": {
+        "description": "Tuning page: every `board_config` dial as a form \u2192 `PUT /board/config`, then apply to\nthe running draft (`POST /draft/{id}/config`) \u2014 signal dials instantly, board-time dials\nvia a restart. Linked from the draft page so no CLI is needed on draft night.",
+        "operationId": "board_config_html_board_config_html_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "draft_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Draft Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Board Config Html"
+      }
+    },
+    "/board/regen": {
+      "post": {
+        "description": "Rebuild the board from core.* under the current config and persist it \u2014 on-demand\nregen, so a `PUT /board/config` change shows up without waiting for the daily job.",
+        "operationId": "board_regen_board_regen_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Board Regen Board Regen Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Board Regen"
+      }
+    },
+    "/draft": {
+      "get": {
+        "description": "Drafts known to this API process: `[{draft_id, running, season}]`.",
+        "operationId": "drafts_draft_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Drafts Draft Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Drafts"
+      }
+    },
+    "/draft.html": {
+      "get": {
+        "description": "`/draft/{id}/state.html` for the configured `sleeper_draft_id` \u2014 the bookmark.",
+        "operationId": "draft_html_default_draft_html_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "season",
+            "required": false,
+            "schema": {
+              "default": 2026,
+              "title": "Season",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 40,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 60.0,
+              "minimum": 0.5,
+              "title": "Refresh",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "interval",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 60.0,
+              "minimum": 0.5,
+              "title": "Interval",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Html Default"
+      }
+    },
+    "/draft/{draft_id}/config": {
+      "post": {
+        "description": "Push the stored `board_config` into the running draft. Without `restart` only the\ndraft-time dials (survival, runs, need bonus, late_rounds) change \u2014 instant recompute.\nWith it the runner is stopped and started again (board rebuild, a few seconds).",
+        "operationId": "draft_apply_config_draft__draft_id__config_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rebuild the board (tiers/cliffs/flags/stream_depth)",
+            "in": "query",
+            "name": "restart",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Rebuild the board (tiers/cliffs/flags/stream_depth)",
+              "title": "Restart",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft Apply Config Draft  Draft Id  Config Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Apply Config"
+      }
+    },
+    "/draft/{draft_id}/start": {
+      "post": {
+        "description": "Pre-draft load (board + ADP + player lookup, once) and start polling Sleeper for this\ndraft on a background thread. Idempotent while the runner is alive. Do this *before* the\ndraft room opens \u2014 the board build takes seconds, the recompute per pick ~50 ms.",
+        "operationId": "draft_start_draft__draft_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/DraftStartBody"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftStartOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Start"
+      }
+    },
+    "/draft/{draft_id}/state": {
+      "get": {
+        "description": "The decision surface from the latest recompute: clock, my roster + needs, available\nplayers by pick_score with tier/cliff/run/survival. `recompute.stale`/`error` flag a failed\nrecompute (rows are then the previous good ones). 404 until `POST /draft/{id}/start`.",
+        "operationId": "draft_state_draft__draft_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "position",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 8,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Position"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 1000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftStateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft State"
+      }
+    },
+    "/draft/{draft_id}/state.html": {
+      "get": {
+        "description": "The draft-night fallback (LS-37): a self-contained page that polls\n`/draft/{id}/state` every `refresh` seconds and offers the start button when the runner\nisn't up. Phone- and second-monitor-readable; no build step.",
+        "operationId": "draft_state_html_draft__draft_id__state_html_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "season",
+            "required": false,
+            "schema": {
+              "default": 2026,
+              "title": "Season",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 40,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 60.0,
+              "minimum": 0.5,
+              "title": "Refresh",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "interval",
+            "required": false,
+            "schema": {
+              "default": 2.0,
+              "maximum": 60.0,
+              "minimum": 0.5,
+              "title": "Interval",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft State Html"
+      }
+    },
+    "/draft/{draft_id}/stop": {
+      "post": {
+        "description": "Stop polling this draft (`{draft_id, running}`); 404 if it isn't running.",
+        "operationId": "draft_stop_draft__draft_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Draft Stop Draft  Draft Id  Stop Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Draft Stop"
+      }
+    },
+    "/ensemble/config": {
+      "put": {
+        "description": "Flip use_overrides and/or pin a fitted version (`latest: true` clears the pin).",
+        "operationId": "put_config_ensemble_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Config Ensemble Config Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Config"
+      }
+    },
+    "/ensemble/overrides": {
+      "delete": {
+        "description": "Remove the manual override for one position, or all positions when omitted.",
+        "operationId": "delete_override_ensemble_overrides_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "default": "season",
+              "title": "Horizon",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "position",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Position"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Override Ensemble Overrides Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Override"
+      },
+      "put": {
+        "description": "Set the manual (\u03bb) override for one position. Does not flip use_overrides by itself.",
+        "operationId": "put_override_ensemble_overrides_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Override Ensemble Overrides Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Override"
+      }
+    },
+    "/ensemble/weights": {
+      "get": {
+        "description": "Weights in force per position, plus the fitted and override rows and the config flags.",
+        "operationId": "ensemble_weights_ensemble_weights_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "horizon",
+            "required": false,
+            "schema": {
+              "default": "season",
+              "title": "Horizon",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ensemble Weights Ensemble Weights Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ensemble Weights"
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Liveness: `{\"status\": \"ok\"}`.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/snapshots": {
+      "get": {
+        "description": "Most recent raw snapshots (id, source, kind, season, week, pulled_at, record_count,\nvalid, byte_size) \u2014 the data-freshness view.",
+        "operationId": "snapshots_snapshots_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Snapshots Snapshots Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Snapshots"
+      }
+    }
+  }
+}
