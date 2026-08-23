@@ -132,6 +132,7 @@ lazy load players && lazy load crosswalk                   # → core.players / 
 lazy load stats                                          # → core.projections/actuals/adp/snap_counts/expected_points
 lazy pull league --load                                  # league/users/rosters/draft/picks → core.drafts/draft_picks/rosters/league_users
 lazy pull picks --draft-id <mock draft id> --load        # draft-night poll target; point at a Sleeper mock to rehearse
+lazy serve                                               # run the API + draft companion; prints all the URLs
 lazy score rules                                         # the league's scoring_settings (latest league snapshot)
 lazy score preview --position RB --top 20                # score latest 2026 projections; --actuals/--week/--source too
 lazy score def-rank                                      # season-average DEF streaming rank (2024–25 actuals)
@@ -358,8 +359,9 @@ runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-
 
 1. Fresh data: the daily pull has run (or `lazy pull projections 2026 && lazy pull adp 2026`), and
    `lazy board regen` shows a sane `/board.html`. Check the dials on `/board/config.html`.
-2. Start the API — **not** with `--reload` (the runner lives in the process):
-   `uv run uvicorn lazy_sleeper.api.app:app --host 0.0.0.0 --port 8000`
+2. Start the API: **`uv run lazy serve`** (or double-click a shortcut to `scripts/serve.ps1`).
+   It prints the exact URLs for the app, the phone, and every page below. Never `--reload` —
+   the draft runner lives in the process.
 3. Find the draft id (Sleeper room URL `sleeper.com/draft/nfl/<id>`; the real one is
    `SLEEPER_DRAFT_ID` in `.env`, so `/draft.html` needs no id). Open
    `http://<host>:8000/draft/<id>/state.html` on the second monitor and/or phone.
@@ -393,7 +395,7 @@ runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-
 
 - [ ] `SLEEPER_DRAFT_ID` in `.env` is the real draft (Sleeper room URL); `MY_DRAFT_SLOT` set once
       the order is known (else the page learns it from `draft_order`)
-- [ ] `uv run uvicorn lazy_sleeper.api.app:app --host 0.0.0.0 --port 8000` (no `--reload`)
+- [ ] `uv run lazy serve` (or the desktop shortcut) — copy the printed phone URL
 - [ ] Open `/draft.html` on the monitor and phone (LAN IP); press **start draft runner**; status
       line shows `poll 2s` and a recompute under ~200 ms
 - [ ] Second terminal ready as backup: `uv run lazy draft poll --advise`
