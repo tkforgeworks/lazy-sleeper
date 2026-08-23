@@ -175,9 +175,18 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   snapshot` compares sha256 vs `SnapshotRepository.latest`; stamps `raw.snapshots.last_seen_at`,
   no new file/Storage object/row; `check freshness` reads `last_seen_at or pulled_at`; `lazy load
   stats` also skips content-dupes already in the archive via `duplicate_scope_ids`). Draft-night
-  2 s polling no longer stores hundreds of identical pick payloads. LS-53 (`core.projections` →
-  latest-wins upsert with pre-game freeze) is the actual DB-growth fix (~9.5 MB/day of kona
-  vintages) — next up.
+  2 s polling no longer stores hundreds of identical pick payloads. **LS-53 done (migration 0013):** `core.projections` = one row per (source,
+  source_player_id, season, week), latest pull wins; `uq_projection_identity` re-keyed (same name,
+  loader `on_conflict` unchanged). **Freeze** (`stat_loaders.week_kickoff/frozen/partition_frozen`):
+  a scope freezes at 00:00 UTC the Thursday of its NFL week (wk 1 = Thursday after Labor Day;
+  season rows freeze at wk-1 kickoff), judged by the snapshot's `pulled_at`, not load time; frozen
+  rows still *insert* missing players (`on_conflict_do_nothing`) but never overwrite — protects the
+  pre-game values the weekly benchmark scores. `lazy load stats --thaw` bypasses (archival rebuilds,
+  load in pulled_at order). Consumers simplified: `StoredProvider`/`benchmark` read the table
+  directly (no `max(snapshot_id)` — that filter would have dropped players missing from the newest
+  payload). Migration collapsed 244,839 → 41,715 rows (−83%); benchmarks reproduced **identically**
+  pre/post (committed CSVs refreshed — only change was a trailing `week` column the writer added
+  after they were last committed). Disk size shrinks when autovacuum reclaims.
 - **Baselines (LS-26, `board/baselines.py`, `lazy board baselines`):** replacement level = points of
   the last starter; cutoffs derived from `roster_positions` × `total_rosters` (now on `ScoringRules`)
   + flex seats filled greedily by value (most-restrictive seat first). 2025 actuals reproduce the plan

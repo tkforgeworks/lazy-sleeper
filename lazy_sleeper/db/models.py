@@ -113,17 +113,20 @@ class Crosswalk(Base):
 
 
 class Projection(Base):
-    """One projection stat line for one player, one season/week, from one snapshot (a *vintage*).
+    """The current projection for one player, one season/week, from one source (LS-53).
 
     `stats` is a JSONB dict in the Sleeper stat vocabulary (which is also the vocabulary of the
     league's `scoring_settings` map) — ESPN stat ids are decoded into it on load. Season totals
-    have week NULL. Rows are per-snapshot so provider revisions stay visible over time.
+    have week NULL. One row per (source, source_player_id, season, week): the latest pull wins
+    until the scope's games kick off (`stat_loaders.frozen`), after which the pre-game value is
+    kept. `snapshot_id` points at the vintage that produced the row; the full vintage history
+    lives in the raw snapshot archive, not here.
     """
 
     __tablename__ = "projections"
     __table_args__ = (
         UniqueConstraint(
-            "snapshot_id",
+            "source",
             "source_player_id",
             "season",
             "week",

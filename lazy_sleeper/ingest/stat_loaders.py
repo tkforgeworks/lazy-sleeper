@@ -14,6 +14,7 @@ import logging
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -281,6 +282,44 @@ _EP_UPDATE = (
 )  # fmt: skip
 
 
+# --- pre-game freeze (LS-53) -------------------------------------------------------------------
+# NFL week 1 starts the Thursday after Labor Day (first Monday of September). We freeze a week's
+# projections at 00:00 UTC that Thursday (Wed evening ET) — comfortably before kickoff — because
+# ESPN's kona feed mutates past weeks after games are played, and the weekly benchmark depends on
+# the stored value being the *pre-game* one. Season totals (week NULL) freeze at week-1 kickoff.
+
+
+def week_kickoff(season: int, week: int) -> datetime:
+    """00:00 UTC on the Thursday of NFL week ``week`` (week 1 = Thursday after Labor Day)."""
+    sept1 = date(season, 9, 1)
+    labor_day = sept1 + timedelta(days=(7 - sept1.weekday()) % 7)  # first Monday
+    thursday = labor_day + timedelta(days=3)
+    d = thursday + timedelta(weeks=week - 1)
+    return datetime(d.year, d.month, d.day, tzinfo=UTC)
+
+
+def frozen(season: int, week: int | None, at: datetime | None) -> bool:
+    """Is the (season, week) scope frozen for a payload pulled at ``at``? The *pull* time is what
+    matters — a pre-kickoff snapshot loaded later still carries pre-game values."""
+    if at is None:
+        return False
+    return at >= week_kickoff(season, week if week is not None else 1)
+
+
+def partition_frozen(
+    rows: list[dict[str, Any]], pulled_at: datetime | None, *, thaw: bool = False
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(live, frozen) — frozen rows may still *insert* a missing player but never overwrite.
+    ``thaw`` bypasses the freeze (archival rebuilds: load snapshots in pulled_at order)."""
+    if thaw or pulled_at is None:
+        return rows, []
+    live: list[dict[str, Any]] = []
+    ice: list[dict[str, Any]] = []
+    for r in rows:
+        (ice if frozen(r["season"], r.get("week"), pulled_at) else live).append(r)
+    return live, ice
+
+
 def _split(rows: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     proj: list[dict[str, Any]] = []
     actual: list[dict[str, Any]] = []
@@ -294,21 +333,38 @@ def _split(rows: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[d
 def _upsert(
     session: Session, table, rows: list[dict[str, Any]], constraint: str, cols, batch: int
 ) -> None:  # noqa: ANN001
+    """Upsert on ``constraint``; ``cols=None`` → insert-if-missing only (frozen scopes)."""
     for i in range(0, len(rows), batch):
         chunk = rows[i : i + batch]
         stmt = insert(table).values(chunk)
-        stmt = stmt.on_conflict_do_update(
-            constraint=constraint, set_={c: getattr(stmt.excluded, c) for c in cols}
-        )
+        if cols is None:
+            stmt = stmt.on_conflict_do_nothing(constraint=constraint)
+        else:
+            stmt = stmt.on_conflict_do_update(
+                constraint=constraint, set_={c: getattr(stmt.excluded, c) for c in cols}
+            )
         session.execute(stmt)
 
 
 def write_stat_rows(
-    session: Session, rows: Iterable[dict[str, Any]], *, batch: int = 2000
+    session: Session,
+    rows: Iterable[dict[str, Any]],
+    *,
+    pulled_at: datetime | None = None,
+    thaw: bool = False,
+    batch: int = 2000,
 ) -> tuple[int, int]:
-    """Route rows to core.projections (per-snapshot vintage) / core.actuals (latest wins)."""
+    """Route rows to core.projections (latest wins per player until the scope's kickoff — LS-53)
+    / core.actuals (latest wins). Frozen projection scopes insert missing players only."""
     proj, actual = _split(rows)
-    _upsert(session, Projection.__table__, proj, "uq_projection_identity", _STAT_UPDATE[1:], batch)
+    live, ice = partition_frozen(proj, pulled_at, thaw=thaw)
+    _upsert(session, Projection.__table__, live, "uq_projection_identity", _STAT_UPDATE, batch)
+    _upsert(session, Projection.__table__, ice, "uq_projection_identity", None, batch)
+    if ice:
+        log.info(
+            "projections: %d rows in frozen (post-kickoff) scopes — insert-if-missing only",
+            len(ice),
+        )
     _upsert(session, Actual.__table__, actual, "uq_actual_identity", _STAT_UPDATE, batch)
     return len(proj), len(actual)
 
@@ -329,16 +385,25 @@ class LoadResult:
 
 
 def load_stat_snapshot(
-    session: Session, snapshot: Snapshot, payload: bytes, resolver: SleeperIdResolver | None = None
+    session: Session,
+    snapshot: Snapshot,
+    payload: bytes,
+    resolver: SleeperIdResolver | None = None,
+    *,
+    thaw: bool = False,
 ) -> LoadResult:
-    """Dispatch one snapshot to the right transform and write."""
+    """Dispatch one snapshot to the right transform and write. ``thaw`` bypasses the projection
+    freeze — archival rebuilds only, loading snapshots in pulled_at order."""
     if snapshot.source == "sleeper" and snapshot.kind in _SLEEPER_KIND_CATEGORY:
         stat_rows, adp_rows = sleeper_stat_rows(payload, snapshot)
-        p, a = write_stat_rows(session, stat_rows)
+        p, a = write_stat_rows(session, stat_rows, pulled_at=snapshot.pulled_at, thaw=thaw)
         return LoadResult(p, a, write_adp(session, adp_rows))
     resolver = resolver or SleeperIdResolver.from_session(session)
     if snapshot.source == "espn" and snapshot.kind == "kona":
-        p, a = write_stat_rows(session, espn_stat_rows(payload, snapshot, resolver))
+        p, a = write_stat_rows(
+            session, espn_stat_rows(payload, snapshot, resolver),
+            pulled_at=snapshot.pulled_at, thaw=thaw,
+        )  # fmt: skip
         _warn_unresolved("espn", snapshot, resolver)
         return LoadResult(p, a, 0)
     if snapshot.source == "nflverse" and snapshot.kind == "stats_player_week":

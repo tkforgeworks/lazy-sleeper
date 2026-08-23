@@ -21,7 +21,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lazy_sleeper.benchmark.season import (
@@ -189,33 +189,21 @@ def run_season(
 def load_weekly_projection_points(
     session: Session, scorer: Scorer, season: int, source: str, weeks: Sequence[int] = WEEKS
 ) -> dict[int, dict[str, float]]:
-    """Latest vintage per (source, season, week), scored per player."""
+    """Weekly projections per (source, season, week), scored per player — the stored row is the
+    pre-game value (LS-53 freeze; historical seasons collapsed to the previously-selected
+    latest vintage)."""
     from lazy_sleeper.db.models import Projection
 
-    latest = dict(
-        session.execute(
-            select(Projection.week, func.max(Projection.snapshot_id))
-            .where(
-                Projection.source == source,
-                Projection.season == season,
-                Projection.week.in_(weeks),
-            )
-            .group_by(Projection.week)
-        ).all()
-    )
     out: dict[int, dict[str, float]] = {}
-    for week, snap_id in latest.items():
-        pts: dict[str, float] = {}
-        for sleeper_id, position, stats in session.execute(
-            select(Projection.sleeper_id, Projection.position, Projection.stats).where(
-                Projection.snapshot_id == snap_id,
-                Projection.season == season,
-                Projection.week == week,
-                Projection.sleeper_id.is_not(None),
-            )
-        ):
-            pts[sleeper_id] = scorer.score(stats, position)
-        out[week] = pts
+    for week, sleeper_id, position, stats in session.execute(
+        select(Projection.week, Projection.sleeper_id, Projection.position, Projection.stats).where(
+            Projection.source == source,
+            Projection.season == season,
+            Projection.week.in_(weeks),
+            Projection.sleeper_id.is_not(None),
+        )
+    ):
+        out.setdefault(week, {})[sleeper_id] = scorer.score(stats, position)
     return out
 
 
