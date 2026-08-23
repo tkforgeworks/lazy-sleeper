@@ -182,6 +182,14 @@ class DraftEngine:
             if picks:
                 self.state.rebuild(picks)
 
+    def set_config(self, cfg: TierConfig) -> Advice:
+        """Swap the draft-time dials (survival / runs / need bonus / late_rounds) and recompute.
+        Dials baked into the board rows at build time (tiers, cliffs, ADP/disagreement flags,
+        ``stream_depth``) need a full restart — ``DraftHost.restart``."""
+        with self._lock:
+            self.board = replace(self.board, cfg=cfg)
+            return self.recompute()
+
     def rebuild(self, rows: Iterable[Mapping[str, Any]], *, recompute: bool = True) -> Advice:
         """Replace all picks from ``core.draft_picks`` rows (start-up, commissioner undo)."""
         with self._lock:

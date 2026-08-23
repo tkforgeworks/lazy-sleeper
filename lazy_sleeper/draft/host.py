@@ -257,6 +257,17 @@ class DraftHost:
         run.runner.join(timeout)
         return run
 
+    def restart(self, draft_id: str, *, timeout: float = 10.0) -> Running | None:
+        """Stop and start again with the same season/cadence: a full board rebuild under the
+        current ``board_config``; draft state comes back from the sink rows."""
+        run = self.stop(draft_id, timeout=timeout)
+        if run is None:
+            return None
+        return self.start(
+            draft_id, run.season, until_complete=run.runner._until_complete,  # noqa: SLF001
+            interval_s=run.runner.poller.interval_s,
+        )  # fmt: skip
+
     def stop_all(self, *, timeout: float = 10.0) -> None:
         for did in list(self._runs):
             self.stop(did, timeout=timeout)

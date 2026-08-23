@@ -1,7 +1,8 @@
 """FastAPI application. M0: health + snapshot inventory; LS-25: ensemble weights switchboard;
 LS-28/29 board config; LS-30 `/board` (latest persisted board), `/board.html`, `POST /board/regen`;
 LS-35 `/draft/{id}/state` served from an in-process `DraftHost` (`POST /draft/{id}/start|stop`);
-LS-37 `/draft/{id}/state.html` + `/draft.html` — the draft-night fallback page."""
+LS-37 `/draft/{id}/state.html` + `/draft.html` — the draft-night fallback page — and
+`/board/config.html`, the tuning page (`PUT /board/config` + `POST /draft/{id}/config`)."""
 
 from __future__ import annotations
 
@@ -483,6 +484,41 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         return draft_page(
             draft_id, season=season, limit=limit, refresh_s=refresh, interval_s=interval
         )
+
+    @app.get("/board/config.html", response_class=HTMLResponse)
+    def board_config_html(draft_id: str | None = None) -> str:
+        """Tuning page: every `board_config` dial as a form → `PUT /board/config`, then apply to
+        the running draft (`POST /draft/{id}/config`) — signal dials instantly, board-time dials
+        via a restart. Linked from the draft page so no CLI is needed on draft night."""
+        from lazy_sleeper.draft.render import config_page
+
+        return config_page(draft_id or settings.sleeper_draft_id)
+
+    @app.post("/draft/{draft_id}/config")
+    def draft_apply_config(
+        draft_id: str,
+        restart: bool = Query(
+            False, description="Rebuild the board (tiers/cliffs/flags/stream_depth)"
+        ),
+        session: Session = Depends(get_session),  # noqa: B008
+    ) -> dict[str, Any]:
+        """Push the stored `board_config` into the running draft. Without `restart` only the
+        draft-time dials (survival, runs, need bonus, late_rounds) change — instant recompute.
+        With it the runner is stopped and started again (board rebuild, a few seconds)."""
+        from lazy_sleeper.board import BoardConfigRepository
+
+        run = host.get(draft_id)
+        if run is None:
+            raise _not_running(draft_id)
+        if restart:
+            run = host.restart(draft_id)
+            assert run is not None  # noqa: S101 — get() just returned it
+            return {"draft_id": draft_id, "restarted": True, "running": run.runner.running,
+                    "recompute_seq": run.engine.latest.seq}  # fmt: skip
+        cfg = BoardConfigRepository(session).get()
+        adv = run.engine.set_config(cfg)
+        return {"draft_id": draft_id, "restarted": False, "running": run.runner.running,
+                "recompute_seq": adv.seq, "error": adv.error}  # fmt: skip
 
     @app.get("/draft.html", response_class=HTMLResponse)
     def draft_html_default(
