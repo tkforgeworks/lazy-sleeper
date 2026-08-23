@@ -422,6 +422,17 @@
             ],
             "title": "Gap To Next"
           },
+          "injury_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Injury Status"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -509,6 +520,7 @@
           "name",
           "position",
           "team",
+          "injury_status",
           "points",
           "vorp",
           "pos_rank",

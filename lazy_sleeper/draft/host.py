@@ -38,6 +38,7 @@ ROW_FIELDS = (
     "name",
     "position",
     "team",
+    "injury_status",
     "points",
     "vorp",
     "pos_rank",
@@ -63,14 +64,21 @@ def _name(names: Mapping[str, str], sleeper_id: str | None) -> str | None:
     return label.rsplit(" ", 1)[0] if label else sleeper_id
 
 
-def row_dict(rank: int, r: BoardRow, names: Mapping[str, str]) -> dict[str, Any]:
+def row_dict(
+    rank: int,
+    r: BoardRow,
+    names: Mapping[str, str],
+    injuries: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     v = r.value
+    injuries = injuries or {}
     return {
         "rank": rank,
         "sleeper_id": v.sleeper_id,
         "name": _name(names, v.sleeper_id),
         "position": v.position,
         "team": v.team,
+        "injury_status": injuries.get(v.sleeper_id),
         "points": v.points,
         "vorp": v.vorp,
         "pos_rank": v.pos_rank,
@@ -126,7 +134,7 @@ def state_payload(
     st: DraftState = engine.state
     spec = st.spec
     names = engine.board.names
-    rows = [row_dict(i, r, names) for i, r in enumerate(a.rows, start=1)]
+    rows = [row_dict(i, r, names, engine.board.injuries) for i, r in enumerate(a.rows, start=1)]
     if position:
         pos = position.upper()
         rows = [r for r in rows if r["position"] == pos]

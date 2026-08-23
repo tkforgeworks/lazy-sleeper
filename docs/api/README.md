@@ -195,6 +195,7 @@ One available player, best pick first (``rank`` = overall pick_score order).
 | `name` | string | yes |  |
 | `position` | string | yes |  |
 | `team` | string | null | yes |  |
+| `injury_status` | string | null | yes |  |
 | `points` | number | yes |  |
 | `vorp` | number | yes |  |
 | `pos_rank` | integer | yes |  |

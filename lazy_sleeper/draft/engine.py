@@ -47,6 +47,7 @@ class BoardContext:
     rank_map: SearchRankAdp | None
     positions: Mapping[str, str]  # sleeper_id → position (fallback when a pick has no metadata)
     names: Mapping[str, str] = field(default_factory=dict)  # sleeper_id → "Name POS/TEAM"
+    injuries: Mapping[str, str] = field(default_factory=dict)  # sleeper_id → injury_status
     season: int | None = None
     built_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -60,6 +61,7 @@ class BoardContext:
         search_rank: Mapping[str, int] | None = None,
         positions: Mapping[str, str] | None = None,
         names: Mapping[str, str] | None = None,
+        injuries: Mapping[str, str] | None = None,
         season: int | None = None,
     ) -> BoardContext:
         rows = tuple(rows)
@@ -72,8 +74,9 @@ class BoardContext:
         for r in rows:
             positions.setdefault(r.value.sleeper_id, r.value.position)
         return cls(
-            rows, dict(adp), cfg, search_rank, rank_map, positions, dict(names or {}), season
-        )
+            rows, dict(adp), cfg, search_rank, rank_map, positions, dict(names or {}),
+            dict(injuries or {}), season,
+        )  # fmt: skip
 
 
 def load_board_context(
@@ -88,7 +91,12 @@ def load_board_context(
     rows = build_board(provider, RosterShape.from_rules(rules), season, cfg, adp)
     players = session.execute(
         select(
-            Player.sleeper_id, Player.full_name, Player.position, Player.team, Player.search_rank
+            Player.sleeper_id,
+            Player.full_name,
+            Player.position,
+            Player.team,
+            Player.search_rank,
+            Player.injury_status,
         )
     ).all()
     return BoardContext.from_rows(
@@ -98,6 +106,7 @@ def load_board_context(
         search_rank={p[0]: p[4] for p in players if p[4] is not None},
         positions={p[0]: p[2] for p in players if p[2]},
         names={p[0]: f"{p[1]} {p[2]}/{p[3]}" for p in players},
+        injuries={p[0]: p[5] for p in players if p[5]},
         season=season,
     )
 

@@ -146,6 +146,7 @@ class DraftRowOut(BaseModel):
     name: str
     position: str
     team: str | None
+    injury_status: str | None
     points: float
     vorp: float
     pos_rank: int
