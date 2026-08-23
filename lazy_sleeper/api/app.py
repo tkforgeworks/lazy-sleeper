@@ -1,10 +1,11 @@
 """FastAPI application. M0: health + snapshot inventory; LS-25: ensemble weights switchboard;
-LS-28/29 board config; LS-30 `/board` (latest persisted board), `/board.html`, `POST /board/regen`.
-Draft endpoints arrive in M4."""
+LS-28/29 board config; LS-30 `/board` (latest persisted board), `/board.html`, `POST /board/regen`;
+LS-35 `/draft/{id}/state` served from an in-process `DraftHost` (`POST /draft/{id}/start|stop`)."""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 from lazy_sleeper.config import Settings, get_settings
 from lazy_sleeper.db.models import Snapshot
 from lazy_sleeper.db.session import make_engine, make_session_factory
+from lazy_sleeper.ingest.http import HttpClient
+from lazy_sleeper.ingest.sleeper import SleeperClient
 from lazy_sleeper.ingest.snapshots import store_from_settings
 from lazy_sleeper.providers import SEASON, WEEKLY, WeightRepository, make_provider
 
@@ -62,6 +65,125 @@ class BoardConfigBody(BaseModel):
     late_rounds: int | None = Field(None, ge=0)
 
 
+class DraftStartBody(BaseModel):
+    season: int = DEFAULT_SEASON
+    forever: bool = False  # keep polling after the draft reports complete
+
+
+class DraftSpecOut(BaseModel):
+    teams: int
+    rounds: int
+    type: str
+    total_picks: int
+
+
+class DraftClockOut(BaseModel):
+    current_pick: int
+    round: int | None
+    on_the_clock: int | None
+    my_slot: int | None
+    my_turn: bool
+    my_next_pick: int | None
+    picks_until_my_turn: int | None
+    picks_made: int
+    complete: bool
+
+
+class SeatedOut(BaseModel):
+    pick_no: int
+    sleeper_id: str | None
+    name: str | None
+    position: str | None
+    seat: str
+
+
+class RosterOut(BaseModel):
+    slot: int
+    picks: list[SeatedOut]
+    counts: dict[str, int]
+    open_starters: dict[str, int]
+    open_flex: int
+    open_bench: int
+    needs: dict[str, float]
+
+
+class RecomputeOut(BaseModel):
+    seq: int
+    pick_no: int
+    computed_at: datetime
+    elapsed_ms: float
+    stale: bool
+    error: str | None
+    count: int
+    avg_ms: float
+    max_ms: float
+    failures: int
+
+
+class BoardMetaOut(BaseModel):
+    built_at: datetime
+    season: int | None
+    rows: int
+    available: int
+
+
+class PollerOut(BaseModel):
+    status: str | None
+    expected_picks: int | None
+    started_at: datetime | None
+    summary: dict[str, Any] | None
+
+
+class DraftRowOut(BaseModel):
+    """One available player, best pick first (``rank`` = overall pick_score order)."""
+
+    rank: int
+    sleeper_id: str
+    name: str
+    position: str
+    team: str | None
+    points: float
+    vorp: float
+    pos_rank: int
+    tier: int | None
+    cliff: bool
+    gap_to_next: float | None
+    adp: float | None
+    adp_delta: float | None
+    adp_flag: str | None
+    disagree: bool
+    survival: float | None
+    run: bool
+    run_count: int
+    pick_score: float | None
+
+
+class DraftStateOut(BaseModel):
+    """The decision surface: who's on the clock, my roster and needs, and the available board
+    ordered by pick_score with tier / cliff / run / survival — from the latest recompute."""
+
+    draft_id: str
+    spec: DraftSpecOut
+    clock: DraftClockOut
+    my_roster: RosterOut | None
+    recompute: RecomputeOut
+    board: BoardMetaOut
+    poller: PollerOut
+    running: bool | None
+    rows: list[DraftRowOut]
+
+
+class DraftStartOut(BaseModel):
+    draft_id: str
+    season: int
+    running: bool
+    started_at: datetime | None
+    already_running: bool
+    my_slot: int | None
+    picks_made: int
+    board_rows: int
+
+
 def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:
     cfg = repo.config()
     latest = repo.latest_version()
@@ -84,7 +206,8 @@ def _weights_payload(repo: WeightRepository, horizon: str) -> dict[str, Any]:
     }
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:  # noqa: ANN001
+    """``draft_host`` (a ``DraftHost``) is injectable so tests can serve the replay fixture."""
     settings = settings or get_settings()
     engine = make_engine(settings)
     sessions = make_session_factory(engine)
@@ -97,7 +220,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             s.close()
 
+    http = HttpClient(
+        timeout_s=settings.http_timeout_s,
+        retries=settings.http_retries,
+        delay_ms=settings.http_delay_ms,
+    )
+
+    def provider(session: Session, name: str):  # noqa: ANN202
+        from lazy_sleeper.scoring import default_scorer, load_league_rules
+
+        return make_provider(session, default_scorer(load_league_rules(session, store)), name)
+
+    def puller(session: Session):  # noqa: ANN202
+        from lazy_sleeper.ingest.espn import EspnClient
+        from lazy_sleeper.ingest.nflverse import NflverseClient
+        from lazy_sleeper.ingest.pipeline import Puller
+
+        return Puller(
+            session=session,
+            store=store,
+            sleeper=SleeperClient(http),
+            espn=EspnClient(http),
+            nflverse=NflverseClient(http),
+        )
+
+    host = draft_host
+    if host is None:
+        from lazy_sleeper.draft.host import DbDraftFactory
+
+        host = DbDraftFactory(
+            sessions, store, SleeperClient(http), provider, puller, settings
+        ).host()
+
     app = FastAPI(title="Lazy Sleeper API", version="0.1.0")
+    app.state.draft_host = host
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -259,6 +415,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         session.commit()
         return {"board": board_meta(b), "rows": len(rows)}
+
+    # --- LS-35: live draft decision surface -------------------------------------------------
+
+    def _not_running(draft_id: str) -> HTTPException:
+        return HTTPException(404, f"draft {draft_id} is not running; POST /draft/{draft_id}/start")
+
+    @app.post("/draft/{draft_id}/start", response_model=DraftStartOut)
+    def draft_start(draft_id: str, body: DraftStartBody | None = None) -> dict[str, Any]:
+        """Pre-draft load (board + ADP + player lookup, once) and start polling Sleeper for this
+        draft on a background thread. Idempotent while the runner is alive. Do this *before* the
+        draft room opens — the board build takes seconds, the recompute per pick ~50 ms."""
+        body = body or DraftStartBody()
+        before = host.get(draft_id)
+        already = before is not None and before.runner.running
+        run = host.start(draft_id, body.season, until_complete=not body.forever)
+        return {
+            "draft_id": draft_id,
+            "season": run.season,
+            "running": run.runner.running,
+            "started_at": run.started_at,
+            "already_running": already,
+            "my_slot": run.engine.state.my_slot,
+            "picks_made": run.engine.state.picks_made,
+            "board_rows": len(run.engine.board.rows),
+        }
+
+    @app.post("/draft/{draft_id}/stop")
+    def draft_stop(draft_id: str) -> dict[str, Any]:
+        run = host.stop(draft_id)
+        if run is None:
+            raise _not_running(draft_id)
+        return {"draft_id": draft_id, "running": run.runner.running}
+
+    @app.get("/draft/{draft_id}/state", response_model=DraftStateOut)
+    def draft_state(
+        draft_id: str,
+        position: str | None = Query(None, min_length=1, max_length=8),
+        limit: int | None = Query(None, ge=1, le=1000),
+    ) -> dict[str, Any]:
+        """The decision surface from the latest recompute: clock, my roster + needs, available
+        players by pick_score with tier/cliff/run/survival. `recompute.stale`/`error` flag a failed
+        recompute (rows are then the previous good ones). 404 until `POST /draft/{id}/start`."""
+        payload = host.state(draft_id, position=position, limit=limit)
+        if payload is None:
+            raise _not_running(draft_id)
+        return payload
+
+    @app.get("/draft")
+    def drafts() -> list[dict[str, Any]]:
+        return [
+            {"draft_id": did, "running": r.runner.running, "season": r.season}
+            for did in host.ids()
+            if (r := host.get(did)) is not None
+        ]
 
     return app
 

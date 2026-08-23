@@ -1252,48 +1252,14 @@ def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
 # --- draft (M4) ------------------------------------------------------------
 
 
-def _draft_engine(ctx: _Ctx, draft_id: str, season: int):  # noqa: ANN202 — DraftEngine
-    """Pre-draft load (board + ADP + player lookup, once) → engine seeded from core.draft_picks."""
-    from lazy_sleeper.board import BoardConfigRepository
-    from lazy_sleeper.draft.engine import DraftEngine, load_board_context
-    from lazy_sleeper.scoring import load_league_rules
+def _draft_factory(ctx: _Ctx, interval: float = 5.0, max_backoff: float = 60.0):  # noqa: ANN202
+    """Production draft wiring shared with the API (LS-35): `DbDraftFactory`."""
+    from lazy_sleeper.draft.host import DbDraftFactory
 
-    with session_scope(ctx.sessions) as s:
-        rules = load_league_rules(s, ctx.store)
-        cfg = BoardConfigRepository(s).get()
-        board = load_board_context(s, ctx.provider(s, "ensemble"), rules, cfg, season)
-    engine = DraftEngine(
-        board, rules, draft_doc=_draft_doc(ctx, draft_id),
-        my_slot=ctx.settings.my_draft_slot, user_id=ctx.settings.sleeper_user_id,
+    return DbDraftFactory(
+        ctx.sessions, ctx.store, SleeperClient(ctx.http), ctx.provider, ctx.puller, ctx.settings,
+        interval_s=interval, max_backoff_s=max_backoff,
     )  # fmt: skip
-    engine.rebuild(_draft_pick_rows(ctx, draft_id))
-    return engine
-
-
-def _draft_doc(ctx: _Ctx, draft_id: str) -> dict | None:
-    from lazy_sleeper.db.models import Draft
-
-    with session_scope(ctx.sessions) as s:
-        row = s.get(Draft, draft_id)
-        if row is None:
-            return None
-        return {"teams": row.teams, "rounds": row.rounds, "type": row.type,
-                "draft_order": row.draft_order}  # fmt: skip
-
-
-def _draft_pick_rows(ctx: _Ctx, draft_id: str) -> list[dict]:
-    from sqlalchemy import select
-
-    from lazy_sleeper.db.models import DraftPick
-
-    with session_scope(ctx.sessions) as s:
-        picks = s.execute(
-            select(DraftPick.pick_no, DraftPick.draft_slot, DraftPick.sleeper_id,
-                   DraftPick.metadata_).where(DraftPick.draft_id == draft_id)
-        ).all()  # fmt: skip
-    return [
-        {"pick_no": p[0], "draft_slot": p[1], "sleeper_id": p[2], "metadata_": p[3]} for p in picks
-    ]
 
 
 def render_advice(  # noqa: ANN001
@@ -1340,7 +1306,7 @@ def draft_advise(
     state from core.draft_picks — run `lazy draft poll` (or `lazy pull picks --load`) first."""
     ctx = _Ctx()
     did = draft_id or ctx.settings.sleeper_draft_id
-    engine = _draft_engine(ctx, did, season)
+    engine = _draft_factory(ctx).engine(did, season)
     mine = engine.state.my_roster()
     typer.echo(render_advice(engine.latest, dict(engine.board.names), top, position))
     if mine:
@@ -1433,7 +1399,8 @@ def draft_poll(
     if advise:
         from lazy_sleeper.draft.engine import DraftRunner
 
-        engine = _draft_engine(ctx, did, season)
+        factory = _draft_factory(ctx, interval, max_backoff)
+        engine = factory.engine(did, season)
         names.update(engine.board.names)
         shown: set[int] = set()
 
@@ -1443,7 +1410,7 @@ def draft_poll(
                 typer.echo(render_advice(a, names, top))
 
         runner = DraftRunner(
-            poller, engine, reload_rows=lambda: _draft_pick_rows(ctx, did),
+            poller, engine, reload_rows=lambda: factory.pick_rows(did),
             on_pick=on_pick, on_advice=on_advice, on_poll=on_poll,
             until_complete=not forever, max_polls=1 if once else None,
         )  # fmt: skip
