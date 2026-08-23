@@ -1,6 +1,7 @@
 """FastAPI application. M0: health + snapshot inventory; LS-25: ensemble weights switchboard;
 LS-28/29 board config; LS-30 `/board` (latest persisted board), `/board.html`, `POST /board/regen`;
-LS-35 `/draft/{id}/state` served from an in-process `DraftHost` (`POST /draft/{id}/start|stop`)."""
+LS-35 `/draft/{id}/state` served from an in-process `DraftHost` (`POST /draft/{id}/start|stop`);
+LS-37 `/draft/{id}/state.html` + `/draft.html` — the draft-night fallback page."""
 
 from __future__ import annotations
 
@@ -461,6 +462,31 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         if payload is None:
             raise _not_running(draft_id)
         return payload
+
+    @app.get("/draft/{draft_id}/state.html", response_class=HTMLResponse)
+    def draft_state_html(
+        draft_id: str,
+        season: int = DEFAULT_SEASON,
+        limit: int = Query(40, ge=1, le=1000),
+        refresh: float = Query(5.0, ge=1.0, le=60.0),
+    ) -> str:
+        """The draft-night fallback (LS-37): a self-contained page that polls
+        `/draft/{id}/state` every `refresh` seconds and offers the start button when the runner
+        isn't up. Phone- and second-monitor-readable; no build step."""
+        from lazy_sleeper.draft.render import draft_page
+
+        return draft_page(draft_id, season=season, limit=limit, refresh_s=refresh)
+
+    @app.get("/draft.html", response_class=HTMLResponse)
+    def draft_html_default(
+        season: int = DEFAULT_SEASON,
+        limit: int = Query(40, ge=1, le=1000),
+        refresh: float = Query(5.0, ge=1.0, le=60.0),
+    ) -> str:
+        """`/draft/{id}/state.html` for the configured `sleeper_draft_id` — the bookmark."""
+        from lazy_sleeper.draft.render import draft_page
+
+        return draft_page(settings.sleeper_draft_id, season=season, limit=limit, refresh_s=refresh)
 
     @app.get("/draft")
     def drafts() -> list[dict[str, Any]]:
