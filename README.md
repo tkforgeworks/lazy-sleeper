@@ -378,6 +378,39 @@ runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-
 7. Afterwards: `lazy draft fixture --draft-id <id> --since <UTC start>` writes
    `tests/fixtures/mock_draft_<id>.json.gz` — the night as an offline replay (below).
 
+### Draft-day runbook (2026-09-04, 8 PM ET)
+
+**Morning:**
+
+- [ ] Daily pull ran green (Actions → daily-pull); if not, `lazy pull projections 2026 && lazy pull adp 2026 --load`
+- [ ] `lazy pull players --load` — **injury statuses are only as fresh as this pull**; the draft
+      surface shows them next to names
+- [ ] `lazy check freshness` and `lazy check joins` clean
+- [ ] `lazy board regen` → eyeball `/board.html` (top ~30 look sane, no missing names)
+- [ ] Dials: `/board/config.html` shows what the last mock settled on
+
+**T-30 minutes:**
+
+- [ ] `SLEEPER_DRAFT_ID` in `.env` is the real draft (Sleeper room URL); `MY_DRAFT_SLOT` set once
+      the order is known (else the page learns it from `draft_order`)
+- [ ] `uv run uvicorn lazy_sleeper.api.app:app --host 0.0.0.0 --port 8000` (no `--reload`)
+- [ ] Open `/draft.html` on the monitor and phone (LAN IP); press **start draft runner**; status
+      line shows `poll 2s` and a recompute under ~200 ms
+- [ ] Second terminal ready as backup: `uv run lazy draft poll --advise`
+
+**During:**
+
+- API died → restart uvicorn, press start again (state rebuilds from `core.draft_picks`)
+- Page frozen but API alive → refresh; still dead → the backup terminal is the same engine
+- K/DEF creeping up the advice mid-draft → tuning page, raise `late_rounds` or lower their weights
+- Commissioner undo → handled automatically (rows rebuild); a `poll … removed` line is normal
+- Route 404s that "should exist" → a stale server is squatting the port; kill by port, restart
+
+**After:**
+
+- [ ] `lazy draft fixture --draft-id <id> --since <UTC start>` → commit the fixture
+- [ ] Keep `data/logs/draft_poll_*.log` (the parseable record of the night)
+
 ### Offline replay (CI / regression)
 
 A fixture = the final pick list + every poll's pick count (`ReplayFixture`). `ReplaySource` replays it

@@ -36,6 +36,7 @@ td.l,th.l{text-align:left}tr.cliff td{border-bottom:2px solid #ef4444}
 .run{background:#7c2d12;color:#fed7aa}.cliffTag{background:#ef4444;color:#fff}
 .disagree{background:#713f12;color:#fde68a}
 tr.t-odd td{background:#161616}tr.mine td{background:#1e3a8a}
+.inj{color:#f87171;font-size:11px;margin-left:4px}
 .surv{display:inline-block;min-width:34px}.surv.lo{color:#f87171}.surv.hi{color:#86efac}
 @media (max-width:640px){th.m,td.m{display:none}body{font-size:13px}th,td{padding:3px 5px}}
 """
@@ -76,7 +77,8 @@ function draw(st){
   if(x.disagree)tags.push('<span class="tag disagree">?</span>');
   const s=x.survival;const sc=s==null?'':s<0.35?'lo':s>0.8?'hi':'';
   const cls=[x.cliff?'cliff':'',`t-${x.tier&&x.tier%2?'odd':'even'}`].filter(Boolean).join(' ');
-  return `<tr class="${cls}"><td>${x.rank}</td><td class="l">${esc(x.name)}</td><td>${x.position}</td>`+
+  const inj=x.injury_status?`<span class="inj">${esc(x.injury_status)}</span>`:'';
+  return `<tr class="${cls}"><td>${x.rank}</td><td class="l">${esc(x.name)}${inj}</td><td>${x.position}</td>`+
    `<td class="m">${esc(x.team||'')}</td><td><b>${num(x.pick_score)}</b></td><td>${num(x.vorp)}</td>`+
    `<td><span class="surv ${sc}">${s==null?'n/a':Math.round(s*100)+'%'}</span></td>`+
    `<td class="m">${num(x.adp)}</td><td>${x.tier??'-'}</td><td class="m">${num(x.gap_to_next)}</td>`+

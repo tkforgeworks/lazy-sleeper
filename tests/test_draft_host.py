@@ -375,3 +375,23 @@ def test_committed_api_docs_match_the_app(client: TestClient) -> None:
     assert (docs / "README.md").read_text(encoding="utf-8") == md
     for path in spec["paths"]:
         assert f"`{path}`" in md
+
+
+def test_injury_status_flows_from_board_context_to_rows_and_page(fx: ReplayFixture) -> None:
+    """A player's injury_status (core.players via load_board_context) reaches /state rows; the
+    fallback page renders it as an .inj tag next to the name."""
+    from dataclasses import replace as dc_replace
+
+    from lazy_sleeper.draft.render import draft_page
+
+    eng = _engine(fx, picks=0)
+    hurt = fx.picks[0]["player_id"]
+    eng.board = dc_replace(eng.board, injuries={hurt: "Questionable"})
+    eng.recompute()
+    rows = state_payload(eng, fx.draft_id)["rows"]
+    by_id = {r["sleeper_id"]: r for r in rows}
+    assert by_id[hurt]["injury_status"] == "Questionable"
+    healthy = fx.picks[1]["player_id"]
+    assert by_id[healthy]["injury_status"] is None
+    html = draft_page("x", season=2026)
+    assert "x.injury_status" in html and 'class="inj"' in html
