@@ -6,6 +6,7 @@ persisted `Snapshot` row. `backfill_dir` imports the pre-existing PowerShell-era
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from collections.abc import Callable
@@ -65,6 +66,21 @@ class Puller:
         result = validator(payload)
         if not result.valid:
             log.warning("validation FAILED for %s: %s", key, result.notes)
+        latest = self._repo.latest(key, valid_only=False)
+        if latest is not None and latest.sha256 == hashlib.sha256(payload).hexdigest():
+            # LS-52: byte-identical to the newest stored snapshot — no new file, no Storage
+            # object, no new row; the pull is still recorded via last_seen_at (freshness).
+            latest.last_seen_at = pulled_at or datetime.now(UTC)
+            log.info(
+                "snapshot %s/%s s=%s w=%s identical to id=%d — deduped (last_seen_at %s)",
+                key.source,
+                key.kind,
+                key.season,
+                key.week,
+                latest.id,
+                latest.last_seen_at.isoformat(),
+            )
+            return latest
         rec = self._store.write(
             key,
             payload,

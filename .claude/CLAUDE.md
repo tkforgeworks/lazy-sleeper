@@ -170,10 +170,14 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   uploaded as a 14-day artifact by `daily-pull.yml`, which runs regen after freshness). Provider
   names resolve in one place: `providers.make_provider(session, scorer, name)`; `_Ctx.provider` and
   the API both use it. `ingest.snapshots.store_from_settings(settings)` builds the SnapshotStore.
-- **Open loose ends:** LS-51 (freshness flags historical seasons
-  STALE) parked for 0.2.0. LS-52 (skip identical snapshots by sha256) + LS-53 (`core.projections` →
-  latest-wins upsert with pre-game freeze) — Supabase growth was ~9.5 MB/day DB + ~7 MB/day Storage
-  as of 2026-08-19 (each pull appends a 17k-row ESPN kona vintage); land before the free tier bites.
+- **Open loose ends:** LS-51 (freshness flags historical seasons STALE) parked for 0.2.0. **LS-52
+  done (migration 0012):** byte-identical pulls dedup onto the existing snapshot row (`Puller.
+  snapshot` compares sha256 vs `SnapshotRepository.latest`; stamps `raw.snapshots.last_seen_at`,
+  no new file/Storage object/row; `check freshness` reads `last_seen_at or pulled_at`; `lazy load
+  stats` also skips content-dupes already in the archive via `duplicate_scope_ids`). Draft-night
+  2 s polling no longer stores hundreds of identical pick payloads. LS-53 (`core.projections` →
+  latest-wins upsert with pre-game freeze) is the actual DB-growth fix (~9.5 MB/day of kona
+  vintages) — next up.
 - **Baselines (LS-26, `board/baselines.py`, `lazy board baselines`):** replacement level = points of
   the last starter; cutoffs derived from `roster_positions` × `total_rosters` (now on `ScoringRules`)
   + flex seats filled greedily by value (most-restrictive seat first). 2025 actuals reproduce the plan
