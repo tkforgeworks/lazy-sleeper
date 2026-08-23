@@ -24,6 +24,7 @@ lazy board baselines            # replacement-level points per position (histori
 lazy board vorp --top 30        # the board: VORP, tiers/cliffs, ADP delta, disagreement flags
 lazy board config               # show/update stored tier/cliff/flag thresholds (draft-day dial)
 lazy board regen                # persist a dated board (derived.boards) + CSV/HTML in data/boards/
+lazy serve                      # run the API + draft companion (the draft-night command)
 lazy db upgrade                 # alembic upgrade head
 """
 
@@ -374,6 +375,72 @@ def load_stats_cmd(
         f"{tsn} snap counts, {tep} expected points"
         + (f"; {len(dupes)} duplicate-content snapshots skipped" if dupes else "")
         + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
+    )
+
+
+# --- serve -----------------------------------------------------------------
+
+
+def _lan_ips() -> list[str]:
+    """Private IPv4 addresses of this machine, primary first (best effort)."""
+    import socket
+
+    ips: list[str] = []
+    try:  # the UDP trick: no packet is sent, but the OS picks the outbound interface
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ips.append(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = info[4][0]
+            # drop loopback, link-local, and (heuristically) virtual-adapter subnets ending .1
+            if ip in ips or ip.startswith(("127.", "169.254.")) or ip.endswith(".1"):
+                continue
+            ips.append(ip)
+    except OSError:
+        pass
+    return ips
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("0.0.0.0", help="Bind address (0.0.0.0 = reachable on the LAN)"),
+    port: int = typer.Option(8000, help="Port"),
+    quiet: bool = typer.Option(False, help="Hide uvicorn access logs"),
+) -> None:
+    """Run the API — the one draft-night command. Prints every address the Flutter app and the
+    HTML fallback pages can be reached at, then serves until Ctrl-C. No --reload: the draft
+    runner lives in this process."""
+    import uvicorn
+
+    from lazy_sleeper.api.app import create_app
+
+    settings = get_settings()
+    lan = _lan_ips() if host in ("0.0.0.0", "") else [host]
+    primary = lan[0] if lan else "127.0.0.1"
+    typer.echo(f"Lazy Sleeper API on port {port} (draft {settings.sleeper_draft_id})")
+    typer.echo("")
+    typer.echo("  App / API base URL (point the Flutter app here):")
+    typer.echo(f"    http://{primary}:{port}")
+    for ip in lan[1:]:
+        typer.echo(f"    http://{ip}:{port}  (alternate interface)")
+    typer.echo("")
+    typer.echo("  Draft-night pages:")
+    typer.echo(f"    this machine:  http://127.0.0.1:{port}/draft.html")
+    typer.echo(f"    phone (LAN):   http://{primary}:{port}/draft.html")
+    typer.echo(f"    pre-draft board:  http://{primary}:{port}/board.html")
+    typer.echo(f"    tuning dials:     http://{primary}:{port}/board/config.html")
+    typer.echo(f"    API docs:         http://{primary}:{port}/docs  (/openapi.json for codegen)")
+    typer.echo("")
+    typer.echo("  Ctrl-C stops the server (and the draft runner with it).")
+    uvicorn.run(
+        create_app(settings),
+        host=host,
+        port=port,
+        log_level="warning" if quiet else "info",
+        access_log=not quiet,
     )
 
 
