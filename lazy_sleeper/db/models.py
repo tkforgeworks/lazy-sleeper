@@ -53,6 +53,9 @@ class Snapshot(Base):
     season: Mapped[int | None] = mapped_column(Integer)
     week: Mapped[int | None] = mapped_column(Integer)
     pulled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # LS-52: stamped when a later pull fetched byte-identical content and was deduped onto
+    # this row; freshness reads coalesce(last_seen_at, pulled_at)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     byte_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)  # relative to snapshot_dir

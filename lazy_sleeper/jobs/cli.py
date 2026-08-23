@@ -53,6 +53,7 @@ from lazy_sleeper.ingest.snapshots import (
 from lazy_sleeper.ingest.stat_loaders import (
     STAT_KINDS,
     SleeperIdResolver,
+    duplicate_scope_ids,
     load_stat_snapshot,
     loaded_snapshot_ids,
 )
@@ -350,10 +351,11 @@ def load_stats_cmd(
                 latest[(snap.source, snap.kind, snap.season, snap.week)] = snap
             snaps = list(latest.values())
         already = set() if reload else loaded_snapshot_ids(s)
+        dupes = set() if reload else duplicate_scope_ids(snaps, already)
         resolver = SleeperIdResolver.from_session(s)
         tp = ta = tadp = tsn = tep = done = 0
         for snap in snaps:
-            if snap.id in already:
+            if snap.id in already or snap.id in dupes:
                 continue
             r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver)
             done += 1
@@ -367,6 +369,7 @@ def load_stats_cmd(
     typer.echo(
         f"loaded {done} snapshots: {tp} projections, {ta} actuals, {tadp} adp, "
         f"{tsn} snap counts, {tep} expected points"
+        + (f"; {len(dupes)} duplicate-content snapshots skipped" if dupes else "")
         + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
     )
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -369,6 +369,25 @@ def _warn_unresolved(source: str, snapshot: Snapshot, resolver: SleeperIdResolve
             snapshot.id,
             len(resolver.unresolved),
         )
+
+
+def duplicate_scope_ids(snaps: Sequence[Any], loaded_ids: set[int]) -> set[int]:
+    """LS-52 defense in depth for pre-existing duplicates in the archive: among ``snaps``
+    (Snapshot rows), ids whose (source, kind, season, week, sha256) matches an already-loaded
+    snapshot — or an earlier snapshot in this same batch — and can be skipped by ``load stats``."""
+    seen: set[tuple[str, str, int | None, int | None, str]] = {
+        (s.source, s.kind, s.season, s.week, s.sha256) for s in snaps if s.id in loaded_ids
+    }
+    dupes: set[int] = set()
+    for s in sorted(snaps, key=lambda s: (s.pulled_at, s.id)):
+        if s.id in loaded_ids:
+            continue
+        scope = (s.source, s.kind, s.season, s.week, s.sha256)
+        if scope in seen:
+            dupes.add(s.id)
+        else:
+            seen.add(scope)
+    return dupes
 
 
 def loaded_snapshot_ids(session: Session) -> set[int]:

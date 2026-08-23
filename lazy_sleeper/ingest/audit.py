@@ -70,11 +70,17 @@ class Freshness:
 def freshness(session: Session, now: datetime | None = None) -> list[Freshness]:
     """Newest snapshot per (source, kind, season) with its age — stale feeds jump out."""
     now = now or datetime.now(UTC)
+
+    def seen(s: Snapshot) -> datetime:
+        # LS-52: a deduped pull stamps last_seen_at instead of adding a row — that still counts
+        return s.last_seen_at or s.pulled_at
+
     latest: dict[tuple[str, str, int | None], Snapshot] = {}
     weeks: dict[tuple[str, str, int | None], set[int]] = {}
     for snap in session.scalars(select(Snapshot).order_by(Snapshot.pulled_at.desc())):
         key = (snap.source, snap.kind, snap.season)
-        latest.setdefault(key, snap)
+        if key not in latest or seen(snap) > seen(latest[key]):
+            latest[key] = snap
         if snap.week is not None:
             weeks.setdefault(key, set()).add(snap.week)
     return [
@@ -82,8 +88,8 @@ def freshness(session: Session, now: datetime | None = None) -> list[Freshness]:
             s.source,
             s.kind,
             s.season,
-            s.pulled_at,
-            (now - s.pulled_at).total_seconds() / 3600,
+            seen(s),
+            (now - seen(s)).total_seconds() / 3600,
             s.valid,
             s.record_count,
             len(weeks.get(key, ())),
