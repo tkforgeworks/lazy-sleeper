@@ -130,7 +130,9 @@ def test_stops_when_pick_count_reaches_rounds_times_teams(fx: ReplayFixture) -> 
     p, _, sleeps = _poller(fx, ReplaySource(fx, counts=[100, 180, 180, 180]))
     summary = p.run()
     assert summary.polls == 2 and summary.complete
-    assert sleeps == [5.0]  # one interval wait between the two polls, none after completion
+    # one interval wait between the two polls; then the final draft refresh retries twice (2 s
+    # apart) because the replay doc still says "drafting" — Sleeper flips it a beat late
+    assert sleeps == [5.0, 2.0, 2.0]
 
 
 def test_stops_on_status_complete_from_draft_doc(fx: ReplayFixture) -> None:
@@ -183,8 +185,9 @@ def test_backoff_doubles_caps_and_resets_on_success(fx: ReplayFixture) -> None:
 
 def test_backoff_jitter_is_bounded() -> None:
     sink = MemorySink("x")
-    hi = DraftPoller(ReplaySource(ReplayFixture({}, [], [])), sink, "x", rng=lambda: 1.0)
-    lo = DraftPoller(ReplaySource(ReplayFixture({}, [], [])), sink, "x", rng=lambda: 0.0)
+    src = ReplaySource(ReplayFixture({}, [], []))
+    hi = DraftPoller(src, sink, "x", rng=lambda: 1.0, interval_s=5.0)
+    lo = DraftPoller(src, sink, "x", rng=lambda: 0.0, interval_s=5.0)
     assert lo.backoff(1) == 10.0 and hi.backoff(1) == 12.5
     assert lo.backoff(10) == 60.0  # capped
 
@@ -202,8 +205,9 @@ def test_sink_failure_is_retried_too(fx: ReplayFixture) -> None:
     sink = BadSink(fx.draft_id)
     sleeps: list[float] = []
     p = DraftPoller(
-        ReplaySource(fx, counts=[40, 40]), sink, fx.draft_id, sleep=sleeps.append, rng=lambda: 0.0
-    )
+        ReplaySource(fx, counts=[40, 40]), sink, fx.draft_id, sleep=sleeps.append, rng=lambda: 0.0,
+        interval_s=5.0,
+    )  # fmt: skip
     summary = p.run(max_polls=1, until_complete=False)
     assert summary.failures == 1 and summary.polls == 1 and len(sink.rows) == 40
     assert sleeps[0] == 10.0
@@ -267,4 +271,5 @@ def test_completion_triggers_a_final_draft_refresh(fx: ReplayFixture) -> None:
     src = _CountingSource(fx, counts=[180], unsettled=0)
     p, _, _ = _poller(fx, src, draft_refresh_every=10)
     summary = p.run()
-    assert summary.complete and src.draft_reads == 2  # poll 1 + the final refresh
+    # poll 1 + the final refresh, retried twice while the doc still says "drafting"
+    assert summary.complete and src.draft_reads == 4

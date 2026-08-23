@@ -15,18 +15,21 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 - **Done:** LS-10–15, 17–35, 37 (PRs #1–#28). 226 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-36** (mock-draft dry run end-to-end through the API + fallback page, plus the
-  offline replay; decide what can be rehearsed before a live mock). Then LS-38 Tailscale, LS-39
+- **Next up: LS-36.** Third mock `1397325850717749248` (2026-08-23, Tim slot 8) ran live through the API +
+  fallback page end-to-end: 133 polls, 180 picks, page verified in a real browser. Feedback: advice
+  felt late on the clock → poll/refresh cut to 2 s (PR #29). Still to do for LS-36: turn that mock's
+  snapshots into a second replay fixture + document the rehearsal procedure. Tim will tune signal
+  weights via more mocks once dials are adjustable from the app (not CLI). Then LS-38 Tailscale, LS-39
   Flutter view.
 - **HTML fallback (LS-37, `draft/render.py`):** `draft_page(draft_id, season=, limit=40,
   refresh_s=5)` = one self-contained page (inline CSS/JS, no build, dark like `/board.html`) whose
-  script polls `GET /draft/{id}/state` every `refresh` s and redraws: clock strip (pick/round, on
+  script polls `GET /draft/{id}/state` every `refresh` s (default **2**) and redraws only when `recompute.seq` changes: clock strip (pick/round, on
   the clock, my slot, **YOU ARE ON THE CLOCK** / until-my-turn), my needs chips (open starters
   highlighted) + my picks with seats, a red banner on `recompute.error`, and the best-available
   table by `pick_score` (score/vorp/surv%/adp/tier/gap/pts + CLIFF/RUN n/value/reach tags; `m`
   columns hide on phones). Position buttons filter client-side. On 404 it shows a **start draft
   runner** button → `POST /draft/{id}/start`. Routes: **`GET /draft/{id}/state.html`** and
-  **`GET /draft.html`** (configured `sleeper_draft_id`) — `?season=&limit=&refresh=`. The
+  **`GET /draft.html`** (configured `sleeper_draft_id`) — `?season=&limit=&refresh=&interval=` (`interval` = poll cadence the start button requests; `POST /start` body `interval_s`). The
   draft-night bookmark. Verified 2026-08-23 against the live API on the 8/21 mock by running the
   page script in Node with a DOM shim (Chrome extension was offline) — draws 15 rows, clock,
   needs. **Still unverified in a real browser — do that as part of LS-36.**
@@ -102,7 +105,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   `poll_once()` = snapshot picks → `sink.sync` (= `load_draft_picks`) → diff pick_nos against what the
   table held → one `PickEvent` per new pick (pick_no order; carries slot/round/sleeper_id/`metadata`
   name; `picked_by None` = autopick). `run(on_pick, stop=, max_polls=, until_complete=)` loops at
-  `interval_s` 5, backoff `interval×2^failures` capped `max_backoff_s` 60 (+≤25 % jitter), resets on
+  `interval_s` **2** (was 5 — the 8/23 mock measured 5.6 s/poll + 5 s page refresh = too slow on the clock), backoff `interval×2^failures` capped `max_backoff_s` 60 (+≤25 % jitter), resets on
   success, never dies; stops on draft `status == complete` or `picks ≥ rounds×teams` (+ a final
   draft-doc refresh so `core.drafts` ends `complete`). Draft doc re-read **every poll until it has
   `draft_order` and status `drafting`** (Sleeper filled `draft_order` in mid-draft on the 8/21 mock),
