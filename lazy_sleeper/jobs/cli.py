@@ -1337,7 +1337,7 @@ def _draft_log_file(draft_id: str) -> Path:
 @draft_app.command("poll")
 def draft_poll(
     draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
-    interval: float = typer.Option(5.0, help="Seconds between polls"),
+    interval: float = typer.Option(2.0, help="Seconds between polls"),
     max_backoff: float = typer.Option(60.0, help="Cap on the error backoff, seconds"),
     once: bool = typer.Option(False, help="Poll a single time and exit"),
     forever: bool = typer.Option(False, help="Keep polling after the draft reports complete"),

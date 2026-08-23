@@ -181,7 +181,7 @@ def test_api_state_404_until_started_then_serves_and_filters(
     r = client.get(f"/draft/{did}/state")
     assert r.status_code == 404 and "start" in r.json()["detail"]
     assert client.get("/draft").json() == []
-    r = client.post(f"/draft/{did}/start", json={"season": 2026})
+    r = client.post(f"/draft/{did}/start", json={"season": 2026, "interval_s": 1.5})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["draft_id"] == did and body["my_slot"] == 8 and body["board_rows"] == 180
@@ -192,6 +192,7 @@ def test_api_state_404_until_started_then_serves_and_filters(
     assert r.status_code == 200, r.text
     st = r.json()
     assert st["clock"]["complete"] and st["running"] is False
+    assert st["poller"]["interval_s"] == 1.5  # the start body's cadence reached the poller
     assert len(st["rows"]) == 0  # replay drafted every board player
     assert st["clock"]["picks_made"] == 180 and st["recompute"]["error"] is None
     assert st["recompute"]["seq"] >= 1 and st["recompute"]["count"] >= 1
@@ -253,6 +254,7 @@ def test_api_serves_the_fallback_page_for_any_draft_and_the_configured_one(
     r = client.get(f"/draft/{fx.draft_id}/state.html", params={"limit": 12, "refresh": 2})
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
     assert f'const DID="{fx.draft_id}"' in r.text and "LIMIT=12,EVERY=2000" in r.text
+    assert "interval_s:2.0" in r.text  # default poll cadence the start button will request
     r = client.get("/draft.html")
     assert r.status_code == 200 and 'const DID="1392685476523024384"' in r.text  # Settings default
     assert (

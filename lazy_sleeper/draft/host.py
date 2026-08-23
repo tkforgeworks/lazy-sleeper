@@ -22,7 +22,12 @@ from sqlalchemy import select
 
 from lazy_sleeper.board.tiers import BoardRow
 from lazy_sleeper.draft.engine import Advice, DraftEngine, DraftRunner, load_board_context
-from lazy_sleeper.draft.poller import DbPickSink, DraftPoller, SleeperPickSource
+from lazy_sleeper.draft.poller import (
+    DEFAULT_INTERVAL_S,
+    DbPickSink,
+    DraftPoller,
+    SleeperPickSource,
+)
 from lazy_sleeper.draft.state import DraftState, TeamRoster
 
 # --- payload ---------------------------------------------------------------------------------
@@ -215,14 +220,24 @@ class DraftHost:
     def ids(self) -> list[str]:
         return sorted(self._runs)
 
-    def start(self, draft_id: str, season: int, *, until_complete: bool = True) -> Running:
-        """Build and start; idempotent while a runner for ``draft_id`` is alive."""
+    def start(
+        self,
+        draft_id: str,
+        season: int,
+        *,
+        until_complete: bool = True,
+        interval_s: float | None = None,
+    ) -> Running:
+        """Build and start; idempotent while a runner for ``draft_id`` is alive. ``interval_s``
+        overrides the poll cadence for this run (the draft-night latency dial)."""
         with self._lock:
             cur = self._runs.get(draft_id)
             if cur is not None and cur.runner.running:
                 return cur
             engine = self._make_engine(draft_id, season)
             poller = self._make_poller(draft_id)
+            if interval_s is not None:
+                poller.interval_s = interval_s
             reload = (
                 (lambda: self._reload_rows(draft_id)) if self._reload_rows is not None else None
             )
@@ -256,6 +271,7 @@ class DraftHost:
             run.engine, draft_id, position=position, limit=limit, running=run.runner.running
         )
         payload["poller"] = {
+            "interval_s": run.runner.poller.interval_s,
             "status": run.runner.poller.status,
             "expected_picks": run.runner.poller.expected_picks,
             "started_at": run.started_at,
@@ -293,7 +309,7 @@ class DbDraftFactory:
         puller,  # noqa: ANN001 — Callable[[Session], Puller]
         settings,  # noqa: ANN001 — Settings
         *,
-        interval_s: float = 5.0,
+        interval_s: float = DEFAULT_INTERVAL_S,
         max_backoff_s: float = 60.0,
         provider_name: str = "ensemble",
     ) -> None:

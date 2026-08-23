@@ -69,6 +69,7 @@ class BoardConfigBody(BaseModel):
 class DraftStartBody(BaseModel):
     season: int = DEFAULT_SEASON
     forever: bool = False  # keep polling after the draft reports complete
+    interval_s: float | None = Field(None, ge=0.5, le=60)  # poll cadence; default 2 s
 
 
 class DraftSpecOut(BaseModel):
@@ -129,6 +130,7 @@ class BoardMetaOut(BaseModel):
 
 
 class PollerOut(BaseModel):
+    interval_s: float
     status: str | None
     expected_picks: int | None
     started_at: datetime | None
@@ -430,7 +432,9 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         body = body or DraftStartBody()
         before = host.get(draft_id)
         already = before is not None and before.runner.running
-        run = host.start(draft_id, body.season, until_complete=not body.forever)
+        run = host.start(
+            draft_id, body.season, until_complete=not body.forever, interval_s=body.interval_s
+        )
         return {
             "draft_id": draft_id,
             "season": run.season,
@@ -468,25 +472,32 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         draft_id: str,
         season: int = DEFAULT_SEASON,
         limit: int = Query(40, ge=1, le=1000),
-        refresh: float = Query(5.0, ge=1.0, le=60.0),
+        refresh: float = Query(2.0, ge=0.5, le=60.0),
+        interval: float = Query(2.0, ge=0.5, le=60.0),
     ) -> str:
         """The draft-night fallback (LS-37): a self-contained page that polls
         `/draft/{id}/state` every `refresh` seconds and offers the start button when the runner
         isn't up. Phone- and second-monitor-readable; no build step."""
         from lazy_sleeper.draft.render import draft_page
 
-        return draft_page(draft_id, season=season, limit=limit, refresh_s=refresh)
+        return draft_page(
+            draft_id, season=season, limit=limit, refresh_s=refresh, interval_s=interval
+        )
 
     @app.get("/draft.html", response_class=HTMLResponse)
     def draft_html_default(
         season: int = DEFAULT_SEASON,
         limit: int = Query(40, ge=1, le=1000),
-        refresh: float = Query(5.0, ge=1.0, le=60.0),
+        refresh: float = Query(2.0, ge=0.5, le=60.0),
+        interval: float = Query(2.0, ge=0.5, le=60.0),
     ) -> str:
         """`/draft/{id}/state.html` for the configured `sleeper_draft_id` — the bookmark."""
         from lazy_sleeper.draft.render import draft_page
 
-        return draft_page(settings.sleeper_draft_id, season=season, limit=limit, refresh_s=refresh)
+        return draft_page(
+            settings.sleeper_draft_id, season=season, limit=limit, refresh_s=refresh,
+            interval_s=interval,
+        )  # fmt: skip
 
     @app.get("/draft")
     def drafts() -> list[dict[str, Any]]:

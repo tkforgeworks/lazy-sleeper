@@ -42,7 +42,7 @@ tr.t-odd td{background:#161616}tr.mine td{background:#1e3a8a}
 
 _JS = """
 const DID=__DID__,LIMIT=__LIMIT__,EVERY=__EVERY__;
-let pos='ALL',timer=null,lastSeq=-1;
+let pos='ALL',timer=null,lastSeq=-1,lastPos='ALL';
 const $=s=>document.querySelector(s);
 const num=(v,d=1)=>v==null?'-':Number(v).toFixed(d);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -81,7 +81,7 @@ function draw(st){
    `<td><span class="surv ${sc}">${s==null?'n/a':Math.round(s*100)+'%'}</span></td>`+
    `<td class="m">${num(x.adp)}</td><td>${x.tier??'-'}</td><td class="m">${num(x.gap_to_next)}</td>`+
    `<td class="m">${num(x.points)}</td><td class="l">${tags.join('')}</td></tr>`;}).join('');
- setStatus(`recompute #${rc.seq} at ${new Date(rc.computed_at).toLocaleTimeString()} (${rc.elapsed_ms} ms)`+
+ setStatus(`recompute #${rc.seq} at ${new Date(rc.computed_at).toLocaleTimeString()} (${rc.elapsed_ms} ms, poll ${st.poller&&st.poller.interval_s?st.poller.interval_s+'s':'?'})`+
   ` · ${st.board.available} available of ${st.board.rows}`+
   (st.running===false?' · poller stopped':'')+(st.poller&&st.poller.status?` · draft ${st.poller.status}`:''),
   st.running===false&&!c.complete);
@@ -93,13 +93,14 @@ async function tick(){
   if(r.status===404){setStatus('draft not started on the server — press start',true);
    $('#start').style.display='';$('#rows').innerHTML='';return;}
   if(!r.ok){setStatus('HTTP '+r.status,true);return;}
-  const st=await r.json();draw(st);
+  const st=await r.json();
+  if(st.recompute.seq!==lastSeq||pos!==lastPos){lastSeq=st.recompute.seq;lastPos=pos;draw(st);}
  }catch(e){setStatus('fetch failed: '+e,true);}
 }
 async function start(){
  setStatus('starting (board build takes a few seconds)…');
  try{const r=await fetch(`/draft/${DID}/start`,{method:'POST',headers:{'content-type':'application/json'},
-  body:JSON.stringify({season:__SEASON__})});
+  body:JSON.stringify({season:__SEASON__,interval_s:__INTERVAL__})});
   if(!r.ok)setStatus('start failed: HTTP '+r.status,true);}catch(e){setStatus('start failed: '+e,true);}
  tick();
 }
@@ -112,7 +113,9 @@ tick();timer=setInterval(tick,EVERY);
 POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
 
 
-def draft_page(draft_id: str, *, season: int, limit: int = 40, refresh_s: float = 5.0) -> str:
+def draft_page(
+    draft_id: str, *, season: int, limit: int = 40, refresh_s: float = 2.0, interval_s: float = 2.0
+) -> str:
     """The fallback page for one draft. Pure function of its arguments — all live data comes
     from the browser's polling of ``/draft/{id}/state``."""
     did = escape(draft_id)
@@ -121,6 +124,7 @@ def draft_page(draft_id: str, *, season: int, limit: int = 40, refresh_s: float 
         .replace("__LIMIT__", str(int(limit)))
         .replace("__EVERY__", str(int(refresh_s * 1000)))
         .replace("__SEASON__", str(int(season)))
+        .replace("__INTERVAL__", repr(float(interval_s)))
     )
     buttons = '<button class="on" data-pos="ALL">ALL</button>' + "".join(
         f'<button data-pos="{p}">{p}</button>' for p in POSITIONS

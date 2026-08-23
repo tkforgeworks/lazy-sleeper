@@ -32,6 +32,7 @@ import json
 import logging
 import random
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -43,6 +44,8 @@ from lazy_sleeper.ingest.snapshots import SnapshotKey
 from lazy_sleeper.ingest.validate import validate_json_any
 
 log = logging.getLogger(__name__)
+
+DEFAULT_INTERVAL_S = 2.0  # Sleeper tolerates this; 5 s + page refresh felt slow on the clock
 
 OnPick = Callable[["PickEvent"], None]
 
@@ -275,7 +278,7 @@ class DraftPoller:
         sink: PickSink,
         draft_id: str,
         *,
-        interval_s: float = 5.0,
+        interval_s: float = DEFAULT_INTERVAL_S,
         max_backoff_s: float = 60.0,
         draft_refresh_every: int = 10,
         sleep: Callable[[float], None] | None = None,
@@ -372,10 +375,17 @@ class DraftPoller:
     def _final_refresh(self) -> None:
         """Sleeper flips `status` to complete a beat after the last pick; catch it so
         `core.drafts` ends with `complete` + `last_picked` instead of a stale `drafting`."""
-        try:
-            self._refresh_draft()
-        except Exception as exc:  # noqa: BLE001
-            log.warning("final draft refresh failed (%s); core.drafts may show stale status", exc)
+        for attempt in range(3):  # the 8/23 mock still read `drafting` on the first try
+            try:
+                self._refresh_draft()
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "final draft refresh failed (%s); core.drafts may show stale status", exc
+                )
+                return
+            if self.status == "complete" or attempt == 2:
+                return
+            (self._sleep or time.sleep)(2.0)
 
     # -- the loop -----------------------------------------------------------------
     def run(
