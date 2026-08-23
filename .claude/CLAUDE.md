@@ -13,12 +13,27 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 ## Status (updated 2026-08-23 — refresh this block whenever a story merges)
 
-- **Done:** LS-10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 (PRs
-  #1–#20). 191 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
+- **Done:** LS-10–15, 17–35 (PRs #1–#27). 224 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **Next up: LS-35** (`GET /draft/{id}/state` serving `DraftEngine.latest` — host the `DraftRunner`
-  in the API process, or the API reads the engine in-process started by `POST /draft/{id}/start`).
-  LS-31 #23, LS-32 #24, LS-33 #25, LS-34 #26 merged.
+- **Next up: LS-37** (HTML fallback: server-rendered `/draft/{id}/state.html`, ~5 s auto-refresh,
+  position filter — reads the same `DraftHost.state` payload). Then LS-36 (mock-draft dry run +
+  offline replay), LS-38 Tailscale, LS-39 Flutter view.
+- **Decision surface (LS-35, `draft/host.py`, API):** `state_payload(engine, draft_id, position=,
+  limit=)` = the `/draft/{id}/state` document — `spec`, `clock` (`current_pick, round,
+  on_the_clock, my_slot, my_turn, my_next_pick, picks_until_my_turn, picks_made, complete`),
+  `my_roster` (seated picks with `seat`, counts, open starters/flex/bench, `needs` score),
+  `recompute` (`seq, pick_no, computed_at, elapsed_ms, stale, error` + count/avg/max/failures),
+  `board` (built_at, rows, available), `poller` (status, expected, run summary), `rows` (available
+  players best-pick-first with `ROW_FIELDS`: vorp/tier/cliff/adp/survival/run/pick_score; `rank` =
+  overall order *before* the position filter). `DraftHost(make_engine, make_poller, reload_rows)`
+  keeps one `DraftRunner` per draft id on a daemon thread (`start` idempotent while alive, `stop`,
+  `state`); `DbDraftFactory(sessions, store, sleeper, provider, puller, settings)` = production
+  factories, shared by the API and `lazy draft poll --advise` (`_draft_factory` in cli). API:
+  **`POST /draft/{id}/start`** (`{season, forever}`; does the pre-draft board load — call it before
+  the room opens), **`GET /draft/{id}/state?position=&limit=`** (404 until started), `POST
+  /draft/{id}/stop`, `GET /draft`; all typed (`DraftStateOut` etc.) in OpenAPI. `create_app(settings,
+  draft_host=)` injects the host → API tests run the replay fixture with no DB. Smoke 2026-08-23 on
+  the 8/21 mock via uvicorn: 669-row board, 49 ms recomputes, poller saw `complete`.
 - **Recompute loop (LS-34, `draft/engine.py`):** `BoardContext` = everything `advise` needs that
   doesn't change during the draft (board rows, ADP, search-rank map, names/positions), loaded once
   via `load_board_context(session, provider, rules, cfg, season)`. `DraftEngine(board, rules,
