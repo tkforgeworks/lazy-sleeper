@@ -24,7 +24,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lazy_sleeper.metrics import bias, mae, rmse, spearman
@@ -206,20 +206,14 @@ def load_pool(
 def load_projection_points(
     session: Session, scorer: Scorer, season: int, source: str
 ) -> dict[str, float]:
-    """Latest season-total vintage for (source, season), scored per player."""
+    """Season-total projections for (source, season), scored per player (one row per player
+    since LS-53 — for historical seasons the migration kept the latest stored vintage)."""
     from lazy_sleeper.db.models import Projection
 
-    latest = session.scalar(
-        select(func.max(Projection.snapshot_id)).where(
-            Projection.source == source, Projection.season == season, Projection.week.is_(None)
-        )
-    )
-    if latest is None:
-        return {}
     out: dict[str, float] = {}
     for sleeper_id, position, stats in session.execute(
         select(Projection.sleeper_id, Projection.position, Projection.stats).where(
-            Projection.snapshot_id == latest,
+            Projection.source == source,
             Projection.season == season,
             Projection.week.is_(None),
             Projection.sleeper_id.is_not(None),

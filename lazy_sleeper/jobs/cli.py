@@ -329,6 +329,9 @@ def load_stats_cmd(
         False, help="Only the latest snapshot per (source, kind, season, week)"
     ),
     reload: bool = typer.Option(False, help="Re-load snapshots already loaded"),
+    thaw: bool = typer.Option(
+        False, help="Bypass the post-kickoff projection freeze (archival rebuilds only)"
+    ),
 ) -> None:
     """Load Sleeper projections/stats + ESPN kona snapshots into core.projections/actuals/adp."""
     from sqlalchemy import select
@@ -357,7 +360,7 @@ def load_stats_cmd(
         for snap in snaps:
             if snap.id in already or snap.id in dupes:
                 continue
-            r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver)
+            r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver, thaw=thaw)
             done += 1
             tp, ta, tadp = tp + r.projections, ta + r.actuals, tadp + r.adp
             tsn, tep = tsn + r.snap_counts, tep + r.expected_points
