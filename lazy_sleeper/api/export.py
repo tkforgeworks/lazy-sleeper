@@ -54,6 +54,7 @@ def to_markdown(spec: dict[str, Any]) -> str:
         "machine-readable contract is `openapi.json` next to this file (also served at",
         "`/openapi.json`, interactive at `/docs`). All responses are JSON unless marked HTML.",
         "No auth (the draft-night host is reached over Tailscale). Times are ISO-8601 UTC.",
+        "Client workflows, untyped response shapes and field semantics: `GUIDE.md`.",
         "",
         "## Endpoints",
         "",
