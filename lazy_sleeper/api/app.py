@@ -280,7 +280,7 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
             max_backoff_s=settings.draft_max_backoff_s,
         ).host()  # fmt: skip
 
-    app = FastAPI(title="Lazy Sleeper API", version="0.1.0")
+    app = FastAPI(title="Lazy Sleeper API", version="0.1.1")
     app.state.draft_host = host
 
     @app.get("/health")
