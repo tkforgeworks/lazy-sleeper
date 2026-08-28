@@ -130,11 +130,29 @@ class BoardMetaOut(BaseModel):
     available: int
 
 
+class PersistOut(BaseModel):
+    """The off-thread writer (snapshots + `core.draft_picks`): `pending` > 0 with
+    `failures_in_a_row` > 0 means the DB is behind Sleeper — advice is unaffected (LS-62)."""
+
+    pending: int
+    applied: int
+    failures: int
+    failures_in_a_row: int
+    dropped: int
+    last_error: str | None
+
+
 class PollerOut(BaseModel):
     interval_s: float
     status: str | None
     expected_picks: int | None
     started_at: datetime | None
+    last_poll_at: datetime | None  # when the last poll *started* (success or not)
+    last_ok_at: datetime | None  # when the last poll succeeded
+    failures_in_a_row: int  # > 0 = the Sleeper fetch is failing and the poller is backing off
+    last_error: str | None
+    degraded: bool  # the start-of-run DB read failed; picks were re-emitted from the payload
+    persist: PersistOut
     summary: dict[str, Any] | None
 
 

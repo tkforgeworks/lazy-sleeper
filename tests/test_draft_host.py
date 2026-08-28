@@ -127,7 +127,7 @@ class _Replay:
         return list(self.sink.rows.values())
 
     def host(self) -> DraftHost:
-        return DraftHost(self.engine, self.poller, self.rows, clock=lambda: 1.0)
+        return DraftHost(self.engine, self.poller, clock=lambda: 1.0)
 
 
 def test_host_runs_the_replay_to_completion_and_serves_state(fx: ReplayFixture) -> None:
@@ -395,3 +395,15 @@ def test_injury_status_flows_from_board_context_to_rows_and_page(fx: ReplayFixtu
     assert by_id[healthy]["injury_status"] is None
     html = draft_page("x", season=2026)
     assert "x.injury_status" in html and 'class="inj"' in html
+
+
+def test_state_reports_poller_health_and_the_writer(fx: ReplayFixture) -> None:
+    host = _Replay(fx).host()
+    run = host.start(fx.draft_id, 2026)
+    run.runner.join(30)
+    p = host.state(fx.draft_id)["poller"]
+    assert p["failures_in_a_row"] == 0 and p["last_error"] is None and p["degraded"] is False
+    assert p["last_ok_at"] is not None and p["last_poll_at"] is not None
+    w = p["persist"]
+    assert w["pending"] == 0 and w["applied"] >= 1 and w["failures"] == 0
+    assert w["dropped"] == 0 and w["last_error"] is None

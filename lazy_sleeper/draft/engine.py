@@ -278,8 +278,9 @@ class DraftRunner:
 
     ``on_pick`` seats the pick and recomputes (on the poll thread — the recompute is ms-scale, and
     doing it inline keeps ``latest`` causally after the pick). ``on_poll`` re-reads the draft doc
-    whenever the poller refreshed it and rebuilds from the sink on a commissioner undo via
-    ``reload_rows`` (a callable returning ``core.draft_picks`` rows for this draft).
+    whenever the poller refreshed it and rebuilds the whole state from the poll's own parsed
+    rows on the first poll (picks an earlier run already delivered are not re-emitted) and on a
+    commissioner undo — the payload is the truth; no DB read sits on this path (LS-62).
     """
 
     def __init__(
@@ -287,7 +288,6 @@ class DraftRunner:
         poller: DraftPoller,
         engine: DraftEngine,
         *,
-        reload_rows: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
         on_pick: Callable[[PickEvent], None] | None = None,
         on_advice: Callable[[Advice], None] | None = None,
         on_poll: Callable[[PollResult], None] | None = None,
@@ -296,7 +296,6 @@ class DraftRunner:
     ) -> None:
         self.poller = poller
         self.engine = engine
-        self._reload_rows = reload_rows
         self._on_pick = on_pick
         self._on_advice = on_advice
         self._on_poll = on_poll
@@ -322,8 +321,8 @@ class DraftRunner:
                 advice = self.engine.recompute()
                 if self._on_advice:
                     self._on_advice(advice)
-        if (r.removed or r.poll_seq == 1) and self._reload_rows is not None:
-            advice = self.engine.rebuild(self._reload_rows())
+        if (r.removed or r.poll_seq == 1) and not r.unchanged:
+            advice = self.engine.rebuild(r.rows)
             if self._on_advice:
                 self._on_advice(advice)
         if self._on_poll:

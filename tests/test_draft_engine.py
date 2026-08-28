@@ -196,15 +196,10 @@ def test_runner_background_thread_exposes_latest_and_stops(fx: ReplayFixture) ->
     assert runner.engine.latest.pick_no == 181
 
 
-def test_runner_rebuilds_from_reload_rows_on_first_poll_and_undo(fx: ReplayFixture) -> None:
-    """Restart mid-draft: the sink already holds 40 picks; poll 1 must seat them even though the
-    poller emits no events for them. A later undo (row count drops) also rebuilds."""
-    calls: list[int] = []
-
-    def reload() -> list[dict]:
-        calls.append(1)
-        return list(sink.rows.values())
-
+def test_runner_rebuilds_from_the_payload_on_first_poll_and_undo(fx: ReplayFixture) -> None:
+    """Restart mid-draft: the sink already holds 40 picks, so poll 1 emits no events for them —
+    the runner must still seat them, from the poll's own rows. A later undo (row count drops)
+    also rebuilds from the payload. No DB read on either path (LS-62)."""
     sink = MemorySink(fx.draft_id)
     pre = DraftPoller(ReplaySource(fx, counts=[40]), sink, fx.draft_id, sleep=lambda _s: None)
     pre.run(max_polls=1)
@@ -213,9 +208,13 @@ def test_runner_rebuilds_from_reload_rows_on_first_poll_and_undo(fx: ReplayFixtu
         ReplaySource(fx, counts=[40, 60, 55, 180]), sink, fx.draft_id, sleep=lambda _s: None
     )
     eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
-    runner = DraftRunner(poller, eng, reload_rows=reload)
+    seen: list = []
+    runner = DraftRunner(poller, eng, on_advice=seen.append)
     runner.run()
-    assert calls and eng.state.picks_made == 180
+    assert runner.summary is not None and runner.summary.events == 145  # 40 already known, 5 redone
+    assert eng.state.picks_made == 180
+    # the undo poll (60 → 55) rebuilt to 55 before the final poll filled the board
+    assert 55 in [a.pick_no - 1 for a in seen]
 
 
 def test_undo_and_repick_inside_one_poll_window_converges(fx: ReplayFixture) -> None:
@@ -239,3 +238,22 @@ def test_undo_and_repick_inside_one_poll_window_converges(fx: ReplayFixture) -> 
     assert seated.count("u0") == 1 and a not in seated
     assert a in {r.value.sleeper_id for r in eng.latest.rows}  # A is advisable again
     assert "u0" not in {r.value.sleeper_id for r in eng.latest.rows}
+
+
+def test_runner_delivers_advice_through_a_full_db_outage(fx: ReplayFixture) -> None:
+    """LS-62: the sink fails on every write for the whole draft. Advice must still be recomputed
+    on every pick; the writer keeps retrying and reports its failure instead of blocking."""
+    from tests.test_draft_poller import _fast, _FlakySink
+
+    sink = _FlakySink(fx.draft_id, fail=10**6)
+    poller = DraftPoller(
+        ReplaySource(fx), sink, fx.draft_id, sleep=lambda _s: None, persister=_fast(sink),
+        flush_timeout_s=0.1,
+    )  # fmt: skip
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
+    seen: list = []
+    runner = DraftRunner(poller, eng, on_advice=seen.append)
+    summary = runner.run()
+    assert summary.complete and summary.events == 180 and summary.failures == 0
+    assert eng.state.complete and eng.timing.count >= 180
+    assert poller.persist.failures >= 1 and poller.persist.degraded and sink.rows == {}

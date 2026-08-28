@@ -12,6 +12,7 @@ import pytest
 from lazy_sleeper.draft.poller import (
     DraftPoller,
     MemorySink,
+    Persister,
     PickEvent,
     Pulled,
     ReplayFixture,
@@ -106,7 +107,7 @@ def test_identical_payload_skips_sync_but_not_the_poll(fx: ReplayFixture) -> Non
 
 def test_restart_does_not_refire_picks_already_in_the_sink(fx: ReplayFixture) -> None:
     sink = MemorySink(fx.draft_id)
-    sink.sync(Pulled(fx.payload(103), None, datetime.now(UTC)))  # a previous run got this far
+    sink.sync(Pulled(fx.payload(103), datetime.now(UTC)))  # a previous run got this far
     p = DraftPoller(ReplaySource(fx, counts=[103, 118]), sink, fx.draft_id, sleep=lambda _: None)
     r1, r2 = p.poll_once(), p.poll_once()
     assert r1.new == ()
@@ -117,7 +118,9 @@ def test_commissioner_undo_is_counted_not_emitted(fx: ReplayFixture) -> None:
     p, sink, _ = _poller(fx, ReplaySource(fx, counts=[64, 60, 64]))
     p.poll_once()
     undo = p.poll_once()
-    assert undo.removed == 4 and undo.new == () and len(sink.rows) == 60
+    assert p.persist.flush()
+    assert undo.removed == 4 and undo.removed_picks == (61, 62, 63, 64) and undo.new == ()
+    assert len(sink.rows) == 60 and len(undo.rows) == 60
     redo = p.poll_once()
     assert [e.pick_no for e in redo.new] == [61, 62, 63, 64]
 
@@ -190,27 +193,6 @@ def test_backoff_jitter_is_bounded() -> None:
     lo = DraftPoller(src, sink, "x", rng=lambda: 0.0, interval_s=5.0)
     assert lo.backoff(1) == 10.0 and hi.backoff(1) == 12.5
     assert lo.backoff(10) == 60.0  # capped
-
-
-def test_sink_failure_is_retried_too(fx: ReplayFixture) -> None:
-    class BadSink(MemorySink):
-        calls = 0
-
-        def sync(self, pulled: Pulled):  # noqa: ANN202
-            BadSink.calls += 1
-            if BadSink.calls == 1:
-                raise RuntimeError("db hiccup")
-            return super().sync(pulled)
-
-    sink = BadSink(fx.draft_id)
-    sleeps: list[float] = []
-    p = DraftPoller(
-        ReplaySource(fx, counts=[40, 40]), sink, fx.draft_id, sleep=sleeps.append, rng=lambda: 0.0,
-        interval_s=5.0,
-    )  # fmt: skip
-    summary = p.run(max_polls=1, until_complete=False)
-    assert summary.failures == 1 and summary.polls == 1 and len(sink.rows) == 40
-    assert sleeps[0] == 10.0
 
 
 def test_on_pick_exception_does_not_kill_the_loop(fx: ReplayFixture) -> None:
@@ -307,7 +289,7 @@ class _Payloads:
             raise StopIteration("replay exhausted")
         p = self._payloads[self._i]
         self._i += 1
-        return Pulled(json.dumps(p).encode(), None, datetime.now(UTC))
+        return Pulled(json.dumps(p).encode(), datetime.now(UTC))
 
     def draft(self) -> bytes | None:
         return self._fx.draft_payload(status="drafting")
@@ -321,4 +303,81 @@ def test_changed_player_at_an_existing_pick_no_is_a_new_event(fx: ReplayFixture)
     assert len(r1.new) == 57
     assert r2.removed == 0 and [(e.pick_no, e.sleeper_id) for e in r2.new] == [(57, "999999")]
     assert r2.new[0].metadata["position"] == "TE"
+    assert p.persist.flush()
     assert sink.rows[57]["sleeper_id"] == "999999" and len(sink.rows) == 57
+
+
+# --- persistence off the poll thread (LS-62) -----------------------------------
+
+
+class _FlakySink(MemorySink):
+    """Fails the first ``fail`` sync calls (a Supabase brownout), then behaves."""
+
+    def __init__(self, draft_id: str, fail: int, *, known_fails: bool = False) -> None:
+        super().__init__(draft_id)
+        self.fail = fail
+        self.known_fails = known_fails
+        self.attempts = 0
+
+    def known(self):  # noqa: ANN202
+        if self.known_fails:
+            raise RuntimeError("db down")
+        return super().known()
+
+    def sync(self, pulled: Pulled) -> None:
+        self.attempts += 1
+        if self.attempts <= self.fail:
+            raise RuntimeError("db hiccup")
+        super().sync(pulled)
+
+
+def _fast(sink: MemorySink) -> Persister:
+    return Persister(sink, retry_base_s=0.01, max_backoff_s=0.05)
+
+
+def test_failing_sink_never_blocks_events_and_the_db_catches_up(fx: ReplayFixture) -> None:
+    sink = _FlakySink(fx.draft_id, fail=3)
+    p = DraftPoller(
+        ReplaySource(fx, counts=[40, 58, 64]), sink, fx.draft_id, sleep=lambda _s: None,
+        persister=_fast(sink),
+    )  # fmt: skip
+    events: list[PickEvent] = []
+    summary = p.run(events.append, max_polls=3, until_complete=False)
+    # every pick was delivered on time, no poll failed, the DB errors were the writer's problem
+    assert summary.polls == 3 and summary.failures == 0 and summary.events == 64
+    assert [e.pick_no for e in events] == list(range(1, 65))
+    assert p.persist.failures == 3 and p.persist.failures_in_a_row == 0
+    # run() drained the queue before returning: the table caught up
+    assert len(sink.rows) == 64 and p.persist.pending == 0 and p.persist.applied >= 3
+    assert "RuntimeError: db hiccup" in (p.persist.last_error or "")
+
+
+def test_known_read_failure_starts_degraded_and_refires_the_board(fx: ReplayFixture) -> None:
+    sink = _FlakySink(fx.draft_id, fail=0, known_fails=True)
+    sink.sync(Pulled(fx.payload(103), datetime.now(UTC)))  # a previous run got this far
+    p = DraftPoller(
+        ReplaySource(fx, counts=[103, 118]), sink, fx.draft_id, sleep=lambda _s: None,
+        persister=_fast(sink),
+    )  # fmt: skip
+    r1, r2 = p.poll_once(), p.poll_once()
+    assert p.degraded and len(r1.new) == 103  # nothing to diff against → all re-emitted once
+    assert [e.pick_no for e in r2.new] == list(range(104, 119))  # then normal
+
+
+def test_persister_bounds_its_backlog_and_close_abandons_what_a_dead_db_left() -> None:
+    sink = _FlakySink("x", fail=10**6)
+    ps = Persister(sink, max_pending=5, retry_base_s=0.01, max_backoff_s=0.02)
+    for i in range(12):
+        ps.submit_picks(Pulled(b"[]", datetime.now(UTC)), i)
+    assert ps.pending == 5 and ps.dropped == 7
+    assert ps.close(timeout=0.1) is False
+    assert ps.pending == 0 and ps.dropped == 12 and ps.failures >= 1
+    ps.submit_picks(Pulled(b"[]", datetime.now(UTC)), 99)  # after close: dropped, not queued
+    assert ps.pending == 0 and ps.dropped == 13
+
+
+def test_draft_doc_is_persisted_off_thread_too(fx: ReplayFixture) -> None:
+    p, sink, _ = _poller(fx, ReplaySource(fx, counts=[40]))
+    p.run(max_polls=1, until_complete=False)
+    assert sink.draft is not None and sink.draft["draft_id"] == fx.draft_id
+    assert sink.synced == 1 and len(sink.rows) == 40

@@ -1467,9 +1467,13 @@ def draft_poll(
     did = draft_id or ctx.settings.sleeper_draft_id
     me = ctx.settings.sleeper_user_id
     log_path = _draft_log_file(did)
-    source = SleeperPickSource(ctx.sessions, ctx.puller, SleeperClient(ctx.http), did)
+    source = SleeperPickSource(SleeperClient(ctx.http), did)
     poller = DraftPoller(
-        source, DbPickSink(ctx.sessions, did), did, interval_s=interval, max_backoff_s=max_backoff
+        source,
+        DbPickSink(ctx.sessions, did, ctx.puller),
+        did,
+        interval_s=interval,
+        max_backoff_s=max_backoff,
     )
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
@@ -1518,7 +1522,7 @@ def draft_poll(
                 typer.echo(render_advice(a, names, top))
 
         runner = DraftRunner(
-            poller, engine, reload_rows=lambda: factory.pick_rows(did),
+            poller, engine,
             on_pick=on_pick, on_advice=on_advice, on_poll=on_poll,
             until_complete=not forever, max_polls=1 if once else None,
         )  # fmt: skip

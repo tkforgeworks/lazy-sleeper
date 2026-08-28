@@ -777,8 +777,58 @@
         "title": "OverrideBody",
         "type": "object"
       },
+      "PersistOut": {
+        "description": "The off-thread writer (snapshots + `core.draft_picks`): `pending` > 0 with\n`failures_in_a_row` > 0 means the DB is behind Sleeper \u2014 advice is unaffected (LS-62).",
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "integer"
+          },
+          "dropped": {
+            "title": "Dropped",
+            "type": "integer"
+          },
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "failures_in_a_row": {
+            "title": "Failures In A Row",
+            "type": "integer"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "applied",
+          "failures",
+          "failures_in_a_row",
+          "dropped",
+          "last_error"
+        ],
+        "title": "PersistOut",
+        "type": "object"
+      },
       "PollerOut": {
         "properties": {
+          "degraded": {
+            "title": "Degraded",
+            "type": "boolean"
+          },
           "expected_picks": {
             "anyOf": [
               {
@@ -790,9 +840,51 @@
             ],
             "title": "Expected Picks"
           },
+          "failures_in_a_row": {
+            "title": "Failures In A Row",
+            "type": "integer"
+          },
           "interval_s": {
             "title": "Interval S",
             "type": "number"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_ok_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Ok At"
+          },
+          "last_poll_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Poll At"
+          },
+          "persist": {
+            "$ref": "#/components/schemas/PersistOut"
           },
           "started_at": {
             "anyOf": [
@@ -835,6 +927,12 @@
           "status",
           "expected_picks",
           "started_at",
+          "last_poll_at",
+          "last_ok_at",
+          "failures_in_a_row",
+          "last_error",
+          "degraded",
+          "persist",
           "summary"
         ],
         "title": "PollerOut",
