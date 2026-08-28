@@ -130,11 +130,31 @@ class BoardMetaOut(BaseModel):
     available: int
 
 
+class PersistOut(BaseModel):
+    """The off-thread writer (snapshots + `core.draft_picks`): `pending` > 0 with
+    `failures_in_a_row` > 0 means the DB is behind Sleeper — advice is unaffected (LS-62)."""
+
+    pending: int
+    applied: int
+    failures: int
+    failures_in_a_row: int
+    dropped: int
+    last_error: str | None
+
+
 class PollerOut(BaseModel):
     interval_s: float
     status: str | None
     expected_picks: int | None
     started_at: datetime | None
+    last_poll_at: datetime | None  # when the last poll *started* (success or not)
+    last_ok_at: datetime | None  # when the last poll succeeded
+    failures_in_a_row: int  # > 0 = the Sleeper fetch is failing and the poller is backing off
+    last_error: str | None
+    degraded: bool  # the start-of-run DB read failed; picks were re-emitted from the payload
+    runner_error: str | None  # the runner thread died with this; `running` is then False
+    rebuild_pending: bool  # a state rebuild raised and will be retried on the next changed poll
+    persist: PersistOut
     summary: dict[str, Any] | None
 
 
@@ -230,6 +250,8 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         retries=settings.http_retries,
         delay_ms=settings.http_delay_ms,
     )
+    # the draft poll's client (LS-65): fail fast, no courtesy pause, the poller retries
+    draft_http = HttpClient(timeout_s=settings.draft_http_timeout_s, retries=0, delay_ms=0)
 
     def provider(session: Session, name: str):  # noqa: ANN202
         from lazy_sleeper.scoring import default_scorer, load_league_rules
@@ -254,8 +276,9 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         from lazy_sleeper.draft.host import DbDraftFactory
 
         host = DbDraftFactory(
-            sessions, store, SleeperClient(http), provider, puller, settings
-        ).host()
+            sessions, store, SleeperClient(draft_http), provider, puller, settings,
+            max_backoff_s=settings.draft_max_backoff_s,
+        ).host()  # fmt: skip
 
     app = FastAPI(title="Lazy Sleeper API", version="0.1.0")
     app.state.draft_host = host

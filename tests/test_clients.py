@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import httpx
+import pytest
 
 from lazy_sleeper.ingest.espn import EspnClient
 from lazy_sleeper.ingest.http import HttpClient
@@ -70,3 +71,30 @@ def test_http_retries_then_succeeds(monkeypatch) -> None:  # noqa: ANN001
     http = HttpClient(delay_ms=0, retries=3, transport=httpx.MockTransport(handler))
     assert http.get_bytes("https://x.test/y") == b"ok"
     assert calls["n"] == 3
+
+
+def test_http_with_zero_retries_fails_fast_and_never_sleeps(monkeypatch) -> None:  # noqa: ANN001
+    """The draft poll's client (LS-65): one attempt, no courtesy pause, the error is the caller's
+    (the poller's capped backoff owns retrying)."""
+    import lazy_sleeper.ingest.http as http_mod
+
+    slept: list[float] = []
+    monkeypatch.setattr(http_mod.time, "sleep", slept.append)
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectTimeout("dead network")
+
+    http = HttpClient(timeout_s=5.0, retries=0, delay_ms=0, transport=httpx.MockTransport(handler))
+    with pytest.raises(httpx.ConnectTimeout):
+        http.get_bytes("https://x.test/y")
+    assert calls["n"] == 1 and slept == []
+
+
+def test_draft_http_settings_are_separate_from_the_daily_pull() -> None:
+    from lazy_sleeper.config import Settings
+
+    s = Settings(_env_file=None)
+    assert (s.http_timeout_s, s.http_retries) == (60.0, 3)
+    assert (s.draft_http_timeout_s, s.draft_max_backoff_s) == (5.0, 15.0)

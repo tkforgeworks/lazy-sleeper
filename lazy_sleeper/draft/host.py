@@ -24,6 +24,7 @@ from lazy_sleeper.board.tiers import BoardRow
 from lazy_sleeper.draft.engine import Advice, DraftEngine, DraftRunner, load_board_context
 from lazy_sleeper.draft.poller import (
     DEFAULT_INTERVAL_S,
+    DEFAULT_MAX_BACKOFF_S,
     DbPickSink,
     DraftPoller,
     SleeperPickSource,
@@ -195,29 +196,30 @@ class Running:
     engine: DraftEngine
     runner: DraftRunner
     started_at: Any = None
-    error: str | None = None  # the runner thread died with this (poller.run never raises)
     lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def error(self) -> str | None:
+        """Set when the runner thread died with an exception (LS-64); None while healthy."""
+        return self.runner.error
 
 
 class DraftHost:
     """Keeps one :class:`DraftRunner` per draft id alive inside the host process.
 
     ``make_engine(draft_id, season)`` does the pre-draft load; ``make_poller(draft_id)`` builds
-    a :class:`DraftPoller`; ``reload_rows(draft_id)`` returns ``core.draft_picks`` rows for
-    restarts / undo. All three are injected so the host is testable with the replay fixture.
+    a :class:`DraftPoller`. Both are injected so the host is testable with the replay fixture.
     """
 
     def __init__(
         self,
         make_engine: Callable[[str, int], DraftEngine],
         make_poller: Callable[[str], DraftPoller],
-        reload_rows: Callable[[str], list[dict[str, Any]]] | None = None,
         *,
         clock: Callable[[], Any] | None = None,
     ) -> None:
         self._make_engine = make_engine
         self._make_poller = make_poller
-        self._reload_rows = reload_rows
         self._clock = clock
         self._lock = threading.Lock()
         self._runs: dict[str, Running] = {}
@@ -240,16 +242,13 @@ class DraftHost:
         overrides the poll cadence for this run (the draft-night latency dial)."""
         with self._lock:
             cur = self._runs.get(draft_id)
-            if cur is not None and cur.runner.running:
-                return cur
+            if cur is not None and cur.runner.running and not cur.runner.stop.is_set():
+                return cur  # a stopped runner may still be flushing its writes; don't wait on it
             engine = self._make_engine(draft_id, season)
             poller = self._make_poller(draft_id)
             if interval_s is not None:
                 poller.interval_s = interval_s
-            reload = (
-                (lambda: self._reload_rows(draft_id)) if self._reload_rows is not None else None
-            )
-            runner = DraftRunner(poller, engine, reload_rows=reload, until_complete=until_complete)
+            runner = DraftRunner(poller, engine, until_complete=until_complete)
             run = Running(
                 draft_id, season, engine, runner, started_at=self._clock() if self._clock else None
             )
@@ -289,11 +288,27 @@ class DraftHost:
         payload = state_payload(
             run.engine, draft_id, position=position, limit=limit, running=run.runner.running
         )
+        p = run.runner.poller
         payload["poller"] = {
-            "interval_s": run.runner.poller.interval_s,
-            "status": run.runner.poller.status,
-            "expected_picks": run.runner.poller.expected_picks,
+            "interval_s": p.interval_s,
+            "status": p.status,
+            "expected_picks": p.expected_picks,
             "started_at": run.started_at,
+            "last_poll_at": p.last_poll_at,
+            "last_ok_at": p.last_ok_at,
+            "failures_in_a_row": p.failures_in_a_row,
+            "last_error": p.last_error,
+            "degraded": p.degraded,
+            "runner_error": run.error,
+            "rebuild_pending": run.runner.rebuild_pending,
+            "persist": {
+                "pending": p.persist.pending,
+                "applied": p.persist.applied,
+                "failures": p.persist.failures,
+                "failures_in_a_row": p.persist.failures_in_a_row,
+                "dropped": p.persist.dropped,
+                "last_error": p.persist.last_error,
+            },
             "summary": (
                 None
                 if run.runner.summary is None
@@ -317,6 +332,8 @@ class DbDraftFactory:
 
     ``provider(session, name)`` is the one place provider names resolve (``_Ctx.provider`` /
     ``providers.make_provider``); ``puller(session)`` builds the snapshot-writing ``Puller``.
+    ``sleeper`` should be a ``SleeperClient`` on the *draft* ``HttpClient`` (short timeout, no
+    retries — ``Settings.draft_http_timeout_s``, LS-65), not the daily-pull one.
     """
 
     def __init__(  # noqa: PLR0913
@@ -329,7 +346,7 @@ class DbDraftFactory:
         settings,  # noqa: ANN001 — Settings
         *,
         interval_s: float = DEFAULT_INTERVAL_S,
-        max_backoff_s: float = 60.0,
+        max_backoff_s: float = DEFAULT_MAX_BACKOFF_S,
         provider_name: str = "ensemble",
     ) -> None:
         self._sessions = sessions
@@ -396,10 +413,9 @@ class DbDraftFactory:
         return eng
 
     def poller(self, draft_id: str) -> DraftPoller:
-        source = SleeperPickSource(self._sessions, self._puller, self._sleeper, draft_id)
         return DraftPoller(
-            source,
-            DbPickSink(self._sessions, draft_id),
+            SleeperPickSource(self._sleeper, draft_id),
+            DbPickSink(self._sessions, draft_id, self._puller),
             draft_id,
             interval_s=self.interval_s,
             max_backoff_s=self.max_backoff_s,
@@ -408,7 +424,7 @@ class DbDraftFactory:
     def host(self) -> DraftHost:
         from datetime import UTC, datetime
 
-        return DraftHost(self.engine, self.poller, self.pick_rows, clock=lambda: datetime.now(UTC))
+        return DraftHost(self.engine, self.poller, clock=lambda: datetime.now(UTC))
 
 
 __all__ = [

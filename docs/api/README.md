@@ -183,6 +183,14 @@ The decision surface: who's on the clock, my roster and needs, and the available
 | `status` | string | null | yes |  |
 | `expected_picks` | integer | null | yes |  |
 | `started_at` | string | null | yes |  |
+| `last_poll_at` | string | null | yes |  |
+| `last_ok_at` | string | null | yes |  |
+| `failures_in_a_row` | integer | yes |  |
+| `last_error` | string | null | yes |  |
+| `degraded` | boolean | yes |  |
+| `runner_error` | string | null | yes |  |
+| `rebuild_pending` | boolean | yes |  |
+| `persist` | PersistOut | yes |  |
 | `summary` | dict[str, any] | null | yes |  |
 
 ### DraftRowOut
@@ -221,3 +229,16 @@ One available player, best pick first (``rank`` = overall pick_score order).
 | `name` | string | null | yes |  |
 | `position` | string | null | yes |  |
 | `seat` | string | yes |  |
+
+### PersistOut
+
+The off-thread writer (snapshots + `core.draft_picks`): `pending` > 0 with `failures_in_a_row` > 0 means the DB is behind Sleeper — advice is unaffected (LS-62).
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `pending` | integer | yes |  |
+| `applied` | integer | yes |  |
+| `failures` | integer | yes |  |
+| `failures_in_a_row` | integer | yes |  |
+| `dropped` | integer | yes |  |
+| `last_error` | string | null | yes |  |

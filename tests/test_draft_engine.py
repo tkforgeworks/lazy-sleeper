@@ -196,15 +196,10 @@ def test_runner_background_thread_exposes_latest_and_stops(fx: ReplayFixture) ->
     assert runner.engine.latest.pick_no == 181
 
 
-def test_runner_rebuilds_from_reload_rows_on_first_poll_and_undo(fx: ReplayFixture) -> None:
-    """Restart mid-draft: the sink already holds 40 picks; poll 1 must seat them even though the
-    poller emits no events for them. A later undo (row count drops) also rebuilds."""
-    calls: list[int] = []
-
-    def reload() -> list[dict]:
-        calls.append(1)
-        return list(sink.rows.values())
-
+def test_runner_rebuilds_from_the_payload_on_first_poll_and_undo(fx: ReplayFixture) -> None:
+    """Restart mid-draft: the sink already holds 40 picks, so poll 1 emits no events for them —
+    the runner must still seat them, from the poll's own rows. A later undo (row count drops)
+    also rebuilds from the payload. No DB read on either path (LS-62)."""
     sink = MemorySink(fx.draft_id)
     pre = DraftPoller(ReplaySource(fx, counts=[40]), sink, fx.draft_id, sleep=lambda _s: None)
     pre.run(max_polls=1)
@@ -213,6 +208,96 @@ def test_runner_rebuilds_from_reload_rows_on_first_poll_and_undo(fx: ReplayFixtu
         ReplaySource(fx, counts=[40, 60, 55, 180]), sink, fx.draft_id, sleep=lambda _s: None
     )
     eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
-    runner = DraftRunner(poller, eng, reload_rows=reload)
+    seen: list = []
+    runner = DraftRunner(poller, eng, on_advice=seen.append)
     runner.run()
-    assert calls and eng.state.picks_made == 180
+    assert runner.summary is not None and runner.summary.events == 145  # 40 already known, 5 redone
+    assert eng.state.picks_made == 180
+    # the undo poll (60 → 55) rebuilt to 55 before the final poll filled the board
+    assert 55 in [a.pick_no - 1 for a in seen]
+
+
+def test_undo_and_repick_inside_one_poll_window_converges(fx: ReplayFixture) -> None:
+    """LS-66: poll n shows pick 57 = A; poll n+1 shows pick 57 = B (the commissioner undid A and
+    the team re-picked B before the next poll). A must return to the pool, B must leave it, and
+    the team's roster must hold exactly one player in that seat."""
+    from tests.test_draft_poller import _Payloads, _swap
+
+    a = fx.picks[56]["player_id"]
+    payloads = [fx.picks[:57], _swap(fx, 57, "u0", "WR"), fx.picks[:56] + _swap(fx, 57, "u0", "WR")[56:] + fx.picks[57:60]]  # fmt: skip
+    sink = MemorySink(fx.draft_id)
+    poller = DraftPoller(_Payloads(fx, payloads), sink, fx.draft_id, sleep=lambda _s: None)
+    eng = DraftEngine(_board(fx, extra=5), RULES, draft_doc=_doc(fx), user_id=ME)
+    runner = DraftRunner(poller, eng, until_complete=False, max_polls=3)
+    runner.run()
+    st = eng.state
+    taken = st.taken()
+    assert "u0" in taken and a not in taken and st.picks_made == 60
+    slot = fx.picks[56]["draft_slot"]
+    seated = [s.sleeper_id for s in st.roster(slot).picks]
+    assert seated.count("u0") == 1 and a not in seated
+    assert a in {r.value.sleeper_id for r in eng.latest.rows}  # A is advisable again
+    assert "u0" not in {r.value.sleeper_id for r in eng.latest.rows}
+
+
+def test_runner_delivers_advice_through_a_full_db_outage(fx: ReplayFixture) -> None:
+    """LS-62: the sink fails on every write for the whole draft. Advice must still be recomputed
+    on every pick; the writer keeps retrying and reports its failure instead of blocking."""
+    from tests.test_draft_poller import _fast, _FlakySink
+
+    sink = _FlakySink(fx.draft_id, fail=10**6)
+    poller = DraftPoller(
+        ReplaySource(fx), sink, fx.draft_id, sleep=lambda _s: None, persister=_fast(sink),
+        flush_timeout_s=0.1,
+    )  # fmt: skip
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
+    seen: list = []
+    runner = DraftRunner(poller, eng, on_advice=seen.append)
+    summary = runner.run()
+    assert summary.complete and summary.events == 180 and summary.failures == 0
+    assert eng.state.complete and eng.timing.count >= 180
+    assert poller.persist.failures >= 1 and poller.persist.degraded and sink.rows == {}
+
+
+def test_runner_retries_a_failed_rebuild_on_the_next_changed_poll(
+    fx: ReplayFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LS-64: the undo rebuild raises once (an engine hiccup); the runner thread survives, flags
+    rebuild_pending, and redoes the rebuild from the next changed payload."""
+    sink = MemorySink(fx.draft_id)
+    poller = DraftPoller(
+        ReplaySource(fx, counts=[60, 55, 55, 70, 180]), sink, fx.draft_id, sleep=lambda _s: None
+    )
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
+    runner = DraftRunner(poller, eng)
+    real = eng.rebuild
+    calls: list[int] = []
+    pending: list[bool] = []
+
+    def flaky(rows, **kw):  # noqa: ANN001, ANN003, ANN202
+        calls.append(len(rows))
+        pending.append(runner.rebuild_pending)
+        if len(calls) == 2:
+            raise RuntimeError("rebuild hiccup")
+        return real(rows, **kw)
+
+    monkeypatch.setattr(eng, "rebuild", flaky)
+    summary = runner.run()
+    assert summary.complete and summary.failures == 0 and runner.error is None
+    # poll 1 (60), the undo (55, raised), the retry on the next *changed* poll (70) — not on the
+    # unchanged one in between — and nothing after
+    assert calls == [60, 55, 70] and pending == [True, True, True]
+    assert not runner.rebuild_pending and eng.state.picks_made == 180
+
+
+def test_runner_records_its_own_death(fx: ReplayFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner, _ = _runner(fx)
+
+    def boom(*a, **kw):  # noqa: ANN002, ANN003, ANN202
+        raise RuntimeError("poller bug")
+
+    monkeypatch.setattr(runner.poller, "run", boom)
+    runner.start()
+    runner.join(5)
+    assert not runner.running and runner.summary is None
+    assert runner.error == "RuntimeError: poller bug"
