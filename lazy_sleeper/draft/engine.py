@@ -18,7 +18,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -134,6 +134,16 @@ class Advice:
 
 EMPTY_ADVICE = Advice(0, 1, None, None, None, (), datetime.min.replace(tzinfo=UTC), 0.0)
 
+# LS-56: how far before the time we first *saw* the latest pick Sleeper's own `last_picked`
+# may sit and still be taken as that pick's exact start (the doc is read just before the picks
+# in the same poll, so a fresh value trails by the poll interval + latency). Anything older
+# belongs to an earlier pick — using it would start the clock early.
+DOC_SLACK_S = 4.0
+
+
+def _ms(v: Any) -> datetime:
+    return datetime.fromtimestamp(int(v) / 1000, UTC)
+
 
 @dataclass
 class Timing:
@@ -158,6 +168,7 @@ class DraftEngine:
         draft_doc: Mapping[str, Any] | None = None,
         my_slot: int | None = None,
         user_id: str | None = None,
+        team_names: Mapping[str, str] | None = None,
         horizon: int | None = None,
         clock: Callable[[], float] = time.perf_counter,
     ) -> None:
@@ -165,6 +176,7 @@ class DraftEngine:
         self._rules = rules
         self._my_slot_override = my_slot
         self._user_id = user_id
+        self._team_names = dict(team_names or {})  # Sleeper user_id → team/display name
         self._horizon = horizon
         self._clock = clock
         self._lock = threading.RLock()
@@ -172,6 +184,11 @@ class DraftEngine:
         self.timing = Timing()
         self.state = DraftState(DraftSpec.build(rules), position_of=board.positions.get)
         self.latest: Advice = EMPTY_ADVICE
+        # LS-56: the pick clock. `pick_started_at` moves only when `current_pick` does, so the
+        # deadline is stable across recomputes within a pick and a client can tick it locally.
+        self.slot_names: dict[int, str] = {}
+        self.pick_timer_s: int | None = None
+        self.pick_started_at: datetime | None = None
         self.set_draft(draft_doc)
 
     # -- draft doc / state --------------------------------------------------------------
@@ -179,10 +196,9 @@ class DraftEngine:
         """(Re)build the spec from the ``/draft/{id}`` doc; keeps seated picks. Sleeper filled
         ``draft_order`` mid-draft on the 8/21 mock, so this is called on every draft refresh."""
         with self._lock:
-            spec = DraftSpec.build(self._rules, draft_doc)
-            my_slot = resolve_my_slot(
-                self._my_slot_override, (draft_doc or {}).get("draft_order"), self._user_id
-            )
+            doc = draft_doc or {}
+            spec = DraftSpec.build(self._rules, doc)
+            my_slot = resolve_my_slot(self._my_slot_override, doc.get("draft_order"), self._user_id)
             picks = [
                 {"pick_no": n, "draft_slot": s, "sleeper_id": sid, "metadata": {"position": pos}}
                 for n, (s, sid, pos) in self.state.picks.items()
@@ -190,6 +206,43 @@ class DraftEngine:
             self.state = DraftState(spec, my_slot=my_slot, position_of=self.board.positions.get)
             if picks:
                 self.state.rebuild(picks)
+            order = doc.get("draft_order") or {}
+            self.slot_names = {
+                int(slot): self._team_names[str(uid)]
+                for uid, slot in order.items()
+                if slot is not None and str(uid) in self._team_names
+            }
+            timer = doc.get("pick_timer")
+            if timer is None and isinstance(doc.get("settings"), Mapping):
+                timer = doc["settings"].get("pick_timer")
+            self.pick_timer_s = int(timer) if timer else None  # 0 / absent = no clock
+            self._note_doc_times(doc)
+
+    def _note_doc_times(self, doc: Mapping[str, Any]) -> None:
+        """Sleeper's doc carries ``start_time`` (pick 1's clock once ``drafting``) and
+        ``last_picked`` (ms) — exact for the current pick *if* it refers to it. The doc doesn't
+        say which pick it means, so it is trusted only when it sits within ``DOC_SLACK_S`` of
+        the time we first saw the latest pick; older values are an earlier pick's."""
+        st = self.state
+        if st.complete:
+            return
+        if not st.picks_made:
+            if doc.get("status") == "drafting" and doc.get("start_time"):
+                self.pick_started_at = _ms(doc["start_time"])
+            return
+        if not doc.get("last_picked"):
+            return
+        lp = _ms(doc["last_picked"])
+        seen = self.pick_started_at
+        if seen is None or seen - timedelta(seconds=DOC_SLACK_S) <= lp <= seen:
+            self.pick_started_at = lp
+
+    @property
+    def pick_deadline(self) -> datetime | None:
+        """When the current pick's clock runs out; None without a timer, a start, or a draft."""
+        if self.state.complete or not self.pick_timer_s or self.pick_started_at is None:
+            return None
+        return self.pick_started_at + timedelta(seconds=self.pick_timer_s)
 
     def set_config(self, cfg: TierConfig) -> Advice:
         """Swap the draft-time dials (survival / runs / need bonus / late_rounds) and recompute.
@@ -199,20 +252,40 @@ class DraftEngine:
             self.board = replace(self.board, cfg=cfg)
             return self.recompute()
 
-    def rebuild(self, rows: Iterable[Mapping[str, Any]], *, recompute: bool = True) -> Advice:
-        """Replace all picks from ``core.draft_picks`` rows (start-up, commissioner undo)."""
+    def rebuild(
+        self,
+        rows: Iterable[Mapping[str, Any]],
+        *,
+        recompute: bool = True,
+        at: datetime | None = None,
+    ) -> Advice:
+        """Replace all picks from ``core.draft_picks`` rows (start-up, commissioner undo) or a
+        poll's parsed picks. The pick clock restarts from the rows' ``first_seen_at`` when they
+        carry one (DB rows), else from ``at`` (the poll that delivered them), else it is unknown
+        until the next pick."""
         with self._lock:
+            rows = list(rows)
+            before = self.state.current_pick
             self.state.rebuild(rows)
+            if self.state.current_pick != before or self.pick_started_at is None:
+                stamps = [r["first_seen_at"] for r in rows if r.get("first_seen_at")]
+                self.pick_started_at = max(stamps) if stamps else at
             return self.recompute() if recompute else self.latest
 
     def on_pick(self, ev: PickEvent) -> Advice:
         with self._lock:
+            before = self.state.current_pick
             self.state.apply(ev)
+            if self.state.current_pick != before:
+                self.pick_started_at = ev.first_seen_at  # ≤ one poll interval after the fact
             return self.recompute()
 
     def remove(self, pick_no: int) -> Advice:
         with self._lock:
+            before = self.state.current_pick
             self.state.remove(pick_no)
+            if self.state.current_pick != before:
+                self.pick_started_at = None  # the clock for a re-opened pick is unknown
             return self.recompute()
 
     # -- the hot path ---------------------------------------------------------------------
@@ -325,7 +398,8 @@ class DraftRunner:
                     self._on_advice(advice)
         if (r.removed or r.poll_seq == 1 or self.rebuild_pending) and not r.unchanged:
             self.rebuild_pending = True  # cleared only once the rebuild has gone through
-            advice = self.engine.rebuild(r.rows)
+            at = max(ev.first_seen_at for ev in r.new) if r.new else None
+            advice = self.engine.rebuild(r.rows, at=at)
             self.rebuild_pending = False
             if self._on_advice:
                 self._on_advice(advice)
@@ -371,6 +445,7 @@ class DraftRunner:
 
 
 __all__ = [
+    "DOC_SLACK_S",
     "EMPTY_ADVICE",
     "Advice",
     "BoardContext",

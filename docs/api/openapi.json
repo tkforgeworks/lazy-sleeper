@@ -326,6 +326,40 @@
             ],
             "title": "On The Clock"
           },
+          "on_the_clock_team_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On The Clock Team Name"
+          },
+          "pick_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pick Deadline"
+          },
+          "pick_timer_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pick Timer S"
+          },
           "picks_made": {
             "title": "Picks Made",
             "type": "integer"
@@ -357,12 +391,15 @@
           "current_pick",
           "round",
           "on_the_clock",
+          "on_the_clock_team_name",
           "my_slot",
           "my_turn",
           "my_next_pick",
           "picks_until_my_turn",
           "picks_made",
-          "complete"
+          "complete",
+          "pick_timer_s",
+          "pick_deadline"
         ],
         "title": "DraftClockOut",
         "type": "object"
@@ -685,6 +722,13 @@
           "poller": {
             "$ref": "#/components/schemas/PollerOut"
           },
+          "recent_picks": {
+            "items": {
+              "$ref": "#/components/schemas/RecentPickOut"
+            },
+            "title": "Recent Picks",
+            "type": "array"
+          },
           "recompute": {
             "$ref": "#/components/schemas/RecomputeOut"
           },
@@ -715,6 +759,7 @@
           "spec",
           "clock",
           "my_roster",
+          "recent_picks",
           "recompute",
           "board",
           "poller",
@@ -953,6 +998,80 @@
           "summary"
         ],
         "title": "PollerOut",
+        "type": "object"
+      },
+      "RecentPickOut": {
+        "description": "One league-wide pick for the feed (most recent first).",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pick_no": {
+            "title": "Pick No",
+            "type": "integer"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "sleeper_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sleeper Id"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot"
+          },
+          "team_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Team Name"
+          }
+        },
+        "required": [
+          "pick_no",
+          "slot",
+          "team_name",
+          "sleeper_id",
+          "name",
+          "position"
+        ],
+        "title": "RecentPickOut",
         "type": "object"
       },
       "RecomputeOut": {

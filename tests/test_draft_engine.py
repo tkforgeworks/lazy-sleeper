@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -301,3 +301,96 @@ def test_runner_records_its_own_death(fx: ReplayFixture, monkeypatch: pytest.Mon
     runner.join(5)
     assert not runner.running and runner.summary is None
     assert runner.error == "RuntimeError: poller bug"
+
+
+# --- LS-56: pick clock, team names ----------------------------------------------------------
+
+
+def _at(s: float) -> datetime:
+    return datetime(2026, 9, 4, 20, 0, 0, tzinfo=UTC) + timedelta(seconds=s)
+
+
+def _ev_at(p: dict, spec: DraftSpec, at: datetime) -> PickEvent:
+    return PickEvent("d", p["pick_no"], spec.round_of(p["pick_no"]), p["draft_slot"],
+                     p["player_id"], None, at, p["pick_no"], 1,
+                     {"position": p["metadata"]["position"]})  # fmt: skip
+
+
+def test_pick_deadline_starts_when_the_pick_is_first_seen_and_holds_across_recomputes(
+    fx: ReplayFixture,
+) -> None:
+    doc = {**_doc(fx), "settings": {"pick_timer": 120}}
+    eng = DraftEngine(_board(fx), RULES, draft_doc=doc, user_id=ME)
+    assert eng.pick_timer_s == 120 and eng.pick_deadline is None  # no pick seen yet
+    spec = eng.state.spec
+    eng.on_pick(_ev_at(fx.picks[0], spec, _at(10)))
+    assert eng.pick_started_at == _at(10) and eng.pick_deadline == _at(130)
+    eng.set_config(TierConfig(need_bonus=1.0))  # a recompute within the pick
+    eng.set_draft(doc)  # a draft-doc refresh within the pick
+    assert eng.pick_deadline == _at(130)
+    eng.on_pick(_ev_at(fx.picks[0], spec, _at(50)))  # same pick re-delivered: not a new pick
+    assert eng.pick_deadline == _at(130)
+    eng.on_pick(_ev_at(fx.picks[1], spec, _at(60)))
+    assert eng.pick_deadline == _at(180)
+    eng.remove(2)  # undo: the re-opened pick has no known clock
+    assert eng.pick_deadline is None
+
+
+def test_pick_deadline_is_null_without_a_timer_or_after_the_draft(fx: ReplayFixture) -> None:
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
+    eng.on_pick(_ev_at(fx.picks[0], eng.state.spec, _at(0)))
+    assert eng.pick_timer_s is None and eng.pick_deadline is None
+    eng = DraftEngine(_board(fx), RULES, draft_doc={**_doc(fx), "pick_timer": 0}, user_id=ME)
+    assert eng.pick_timer_s is None
+    eng = DraftEngine(_board(fx), RULES, draft_doc={**_doc(fx), "pick_timer": 90}, user_id=ME)
+    spec = eng.state.spec
+    for p in fx.picks:
+        eng.on_pick(_ev_at(p, spec, _at(p["pick_no"])))
+    assert eng.state.complete and eng.pick_deadline is None
+
+
+def test_doc_last_picked_refines_the_clock_only_when_it_is_the_current_pick(
+    fx: ReplayFixture,
+) -> None:
+    def ms(dt: datetime) -> int:
+        return int(dt.timestamp() * 1000)
+
+    doc = {**_doc(fx), "pick_timer": 120, "status": "drafting", "start_time": ms(_at(0))}
+    eng = DraftEngine(_board(fx), RULES, draft_doc=doc, user_id=ME)
+    assert eng.pick_started_at == _at(0)  # the first pick is on the clock from the start
+    spec = eng.state.spec
+    eng.on_pick(_ev_at(fx.picks[0], spec, _at(31.5)))  # seen ≤ one poll after the real pick
+    eng.set_draft({**doc, "last_picked": ms(_at(30))})  # Sleeper: the exact time, 1.5 s earlier
+    assert eng.pick_started_at == _at(30)
+    eng.on_pick(_ev_at(fx.picks[1], spec, _at(95)))
+    eng.set_draft({**doc, "last_picked": ms(_at(30))})  # a stale doc: the previous pick
+    assert eng.pick_started_at == _at(95)
+    eng.set_draft({**doc, "last_picked": ms(_at(96))})  # never later than first seen
+    assert eng.pick_started_at == _at(95)
+
+
+def test_rebuild_restarts_the_clock_from_db_stamps_or_the_delivering_poll(
+    fx: ReplayFixture,
+) -> None:
+    eng = DraftEngine(_board(fx), RULES, draft_doc={**_doc(fx), "pick_timer": 120}, user_id=ME)
+    rows = _rows(fx.picks[:5])
+    for i, r in enumerate(rows):
+        r["first_seen_at"] = _at(10 * i)
+    eng.rebuild(rows)  # start-up from core.draft_picks
+    assert eng.pick_started_at == _at(40) and eng.state.current_pick == 6
+    eng.rebuild(_rows(fx.picks[:5]), at=_at(99))  # same picks from a poll: clock unchanged
+    assert eng.pick_started_at == _at(40)
+    eng.rebuild(_rows(fx.picks[:7]), at=_at(70))  # new picks in the payload: that poll's time
+    assert eng.pick_started_at == _at(70) and eng.pick_deadline == _at(190)
+    eng.rebuild(_rows(fx.picks[:3]))  # undo via rebuild with no time: unknown
+    assert eng.pick_started_at is None and eng.pick_deadline is None
+
+
+def test_team_names_follow_draft_order(fx: ReplayFixture) -> None:
+    names = {ME: "Lazy Sleepers", "111": "The Other Guys"}
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME, team_names=names)
+    assert eng.slot_names == {8: "Lazy Sleepers"}
+    eng.set_draft({**_doc(fx), "draft_order": {ME: 8, "111": 1, "222": 2}})
+    assert eng.slot_names == {8: "Lazy Sleepers", 1: "The Other Guys"}  # 222: no user row
+    eng.set_draft({**_doc(fx), "draft_order": None})
+    assert eng.slot_names == {}

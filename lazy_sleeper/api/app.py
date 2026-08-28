@@ -86,12 +86,26 @@ class DraftClockOut(BaseModel):
     current_pick: int
     round: int | None
     on_the_clock: int | None
+    on_the_clock_team_name: str | None  # from draft_order + league users; null until assigned
     my_slot: int | None
     my_turn: bool
     my_next_pick: int | None
     picks_until_my_turn: int | None
     picks_made: int
     complete: bool
+    pick_timer_s: int | None  # Sleeper settings.pick_timer; null = no clock
+    pick_deadline: datetime | None  # UTC; stable within a pick — tick it locally between polls
+
+
+class RecentPickOut(BaseModel):
+    """One league-wide pick for the feed (most recent first)."""
+
+    pick_no: int
+    slot: int | None
+    team_name: str | None
+    sleeper_id: str | None
+    name: str | None
+    position: str | None
 
 
 class SeatedOut(BaseModel):
@@ -193,6 +207,7 @@ class DraftStateOut(BaseModel):
     spec: DraftSpecOut
     clock: DraftClockOut
     my_roster: RosterOut | None
+    recent_picks: list[RecentPickOut]  # last ~8 picks league-wide, most recent first
     recompute: RecomputeOut
     board: BoardMetaOut
     poller: PollerOut

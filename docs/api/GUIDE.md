@@ -32,7 +32,21 @@ shapes of the endpoints that return untyped JSON, and what the fields actually m
    unchanged `seq` means nothing new. (The built-in fallback page does exactly this.)
 3. **Render from the payload** (`DraftStateOut`, fully typed in the reference):
    - `clock` drives the header: `my_turn`, `picks_until_my_turn` (0 = on the clock),
-     `on_the_clock` (slot number), `round`, `current_pick`, `complete`.
+     `on_the_clock` (slot number), `on_the_clock_team_name` (null until Sleeper has assigned
+     `draft_order` — fall back to the slot), `round`, `current_pick`, `complete`.
+   - **The pick timer** (`clock.pick_deadline`, UTC; `clock.pick_timer_s`): the server derives
+     the deadline from Sleeper's `settings.pick_timer` and when the current pick started, and
+     keeps it **fixed for the life of that pick** — it moves only when `current_pick` does.
+     Tick `seconds_remaining = pick_deadline − now` on a local 1 s timer between polls; do not
+     poll faster. **This is the one exemption from the `recompute.seq` redraw rule:** the
+     timer (and anything else derived from `clock`) redraws every tick, regardless of `seq`.
+     Both are `null` when the draft has no timer or the start of the current pick is unknown
+     (before the room opens; briefly after a commissioner undo). Accuracy: the pick start is
+     the poll that first saw the previous pick (≤ one poll interval late, i.e. ≤ 2 s) or
+     Sleeper's own `last_picked` when the doc refresh caught it — so the countdown can run up
+     to ~2 s behind Sleeper's, never ahead. Panic threshold `my_turn && seconds_remaining ≤ 30`.
+   - `recent_picks` is the league-wide feed: the last 8 picks, most recent first —
+     `{pick_no, slot, team_name, sleeper_id, name, position}` (`team_name` null like above).
    - `my_roster` drives the needs view: `open_starters` (position → open seats), `open_flex`,
      `open_bench`, `picks` with their `seat`.
    - `rows` is the decision table, best pick first by `pick_score`. `rank` is the *overall*
@@ -173,6 +187,10 @@ The reference marks these as "object" because the app returns plain dicts. Their
   `"BN"` (bench). Seats fill greedily in pick order: dedicated → eligible flex → bench.
 - **`needs`** (roster) — per-position urgency score: open starter 1.0 + flex share 0.5 +
   bench 0.25 × bench mix. Higher = draft this position sooner.
+- **`pick_deadline`** / **`pick_timer_s`** (clock) — when the current pick's timer runs out,
+  UTC, and the timer length; see Workflow 1 for how to tick it and its accuracy.
+- **`on_the_clock_team_name`** (clock) / **`team_name`** (recent picks) — the Sleeper team name
+  (display name when the team has none) of the slot, via `draft_order` + league users.
 - **`poller.status`** — Sleeper's draft status: `pre_draft` → `drafting` → `complete`.
 - **`recompute.stale`** — the advice shown is from before the latest pick (recompute failed);
   `recompute.error` carries the message.

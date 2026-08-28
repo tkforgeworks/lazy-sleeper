@@ -110,6 +110,7 @@ The decision surface: who's on the clock, my roster and needs, and the available
 | `spec` | DraftSpecOut | yes |  |
 | `clock` | DraftClockOut | yes |  |
 | `my_roster` | RosterOut | null | yes |  |
+| `recent_picks` | RecentPickOut[] | yes |  |
 | `recompute` | RecomputeOut | yes |  |
 | `board` | BoardMetaOut | yes |  |
 | `poller` | PollerOut | yes |  |
@@ -132,12 +133,15 @@ The decision surface: who's on the clock, my roster and needs, and the available
 | `current_pick` | integer | yes |  |
 | `round` | integer | null | yes |  |
 | `on_the_clock` | integer | null | yes |  |
+| `on_the_clock_team_name` | string | null | yes |  |
 | `my_slot` | integer | null | yes |  |
 | `my_turn` | boolean | yes |  |
 | `my_next_pick` | integer | null | yes |  |
 | `picks_until_my_turn` | integer | null | yes |  |
 | `picks_made` | integer | yes |  |
 | `complete` | boolean | yes |  |
+| `pick_timer_s` | integer | null | yes |  |
+| `pick_deadline` | string | null | yes |  |
 
 ### RosterOut
 
@@ -150,6 +154,19 @@ The decision surface: who's on the clock, my roster and needs, and the available
 | `open_flex` | integer | yes |  |
 | `open_bench` | integer | yes |  |
 | `needs` | dict[str, number] | yes |  |
+
+### RecentPickOut
+
+One league-wide pick for the feed (most recent first).
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `pick_no` | integer | yes |  |
+| `slot` | integer | null | yes |  |
+| `team_name` | string | null | yes |  |
+| `sleeper_id` | string | null | yes |  |
+| `name` | string | null | yes |  |
+| `position` | string | null | yes |  |
 
 ### RecomputeOut
 
