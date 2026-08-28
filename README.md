@@ -355,6 +355,13 @@ The loop is **poller → state → recompute → `/draft/{id}/state` → page**,
 runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-23 mock: 118 polls,
 2 s cadence, recompute avg 49 ms.
 
+Since 0.1.1 the poll thread only talks to Sleeper (5 s timeout, no retries, ≤ 15 s backoff) and diffs
+each payload against its own memory of the last one; snapshots and `core.draft_picks` are written by
+a separate `Persister` thread that retries with backoff and catches up. **A Supabase outage never
+stops pick detection** — it shows up as `DB sync behind` on the page and the writer heals itself.
+The page redraws the clock, status line and banner on every tick and only gates the table on the
+recompute sequence, so a stalled or dead poller is visible within a few seconds.
+
 ### Procedure (mock or the real thing)
 
 1. Fresh data: the daily pull has run (or `lazy pull projections 2026 && lazy pull adp 2026`), and
@@ -366,9 +373,11 @@ runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-
    `SLEEPER_DRAFT_ID` in `.env`, so `/draft.html` needs no id). Open
    `http://<host>:8000/draft/<id>/state.html` on the second monitor and/or phone.
 4. Press **start draft runner** *before* the room starts drafting. The status line shows
-   `recompute #n … poll 2s`; the clock strip shows your slot once Sleeper assigns `draft_order`
-   (on mocks it can land mid-draft — the page picks it up; set `MY_DRAFT_SLOT` in `.env` and restart
-   the API if it stays `?`).
+   `recompute #n … poll 2s · last ok 1s ago`; the clock strip shows your slot once Sleeper assigns
+   `draft_order` (on mocks it can land mid-draft — the page picks it up; set `MY_DRAFT_SLOT` in
+   `.env` and restart the API if it stays `?`). Status line colours: grey = healthy, **yellow** =
+   the DB writer is behind (advice unaffected), **red** = polls failing / stale / poller stopped;
+   a red banner = runner died, recompute failed, or Sleeper unreachable for 3+ polls.
 5. Draft. **YOU ARE ON THE CLOCK** in yellow = your turn; top row is the recommendation
    (`score` = VORP − what you'd lose by waiting + need bonus; `surv` = chance he survives to your next
    pick; `RUN n` / `CLIFF` tags). Position buttons filter. Tune mid-draft from the **tuning** link:
@@ -391,6 +400,19 @@ runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-
 - [ ] `lazy board regen` → eyeball `/board.html` (top ~30 look sane, no missing names)
 - [ ] Dials: `/board/config.html` shows what the last mock settled on
 
+**Phone + firewall (do once, days before — the first inbound connection is where it fails):**
+
+- [ ] `uv run lazy serve`, then open the printed LAN URL on the phone over the house Wi-Fi.
+      Windows Defender pops an **inbound connection** prompt for `python.exe` the first time —
+      allow it on **Private** networks. The prompt comes back whenever the venv's `python.exe`
+      changes (`uv sync` after a Python bump), so re-check after any dependency update.
+- [ ] The PC's Wi-Fi/Ethernet profile is **Private** (Settings → Network & internet → the adapter →
+      Network profile type). On **Public** the allow rule doesn't apply and the phone just spins.
+- [ ] Phone auto-lock set to never / "keep screen on" for the night. If it does lock, the page
+      catches up the moment it wakes (`visibilitychange` → immediate poll).
+- [ ] Portrait on the phone: `m` columns hide under 640 px; the table scrolls inside its own box
+      (the page never scrolls sideways); the header row stays pinned while you scroll.
+
 **T-30 minutes:**
 
 - [ ] `SLEEPER_DRAFT_ID` in `.env` is the real draft (Sleeper room URL); `MY_DRAFT_SLOT` set once
@@ -404,6 +426,12 @@ runner starts (~5–10 s); each pick then costs ~50 ms. Measured on the 2026-08-
 
 - API died → restart uvicorn, press start again (state rebuilds from `core.draft_picks`)
 - Page frozen but API alive → refresh; still dead → the backup terminal is the same engine
+- Status line yellow `DB sync behind` → Supabase is slow/down; advice is unaffected, the writer
+  catches up on its own. Only `/start` and `restart` need the DB (board build + state seed).
+- Red `poll failing ×n` / banner `Sleeper unreachable` → the poller retries every ≤ 15 s; nothing
+  to do unless the home network is down. `poll stale` with no failures → the runner thread is
+  wedged: press start (it's idempotent) or restart from the tuning page.
+- Banner `draft runner died` → press start; the state comes back from the last payload/DB.
 - K/DEF creeping up the advice mid-draft → tuning page, raise `late_rounds` or lower their weights
 - Commissioner undo → handled automatically (rows rebuild); a `poll … removed` line is normal
 - Route 404s that "should exist" → a stale server is squatting the port; kill by port, restart
@@ -425,7 +453,7 @@ builder — the format stores one pick list.
 | Surface | What |
 |---|---|
 | `GET /draft/{id}/state.html`, `GET /draft.html` | the page (`?limit=&refresh=&interval=`) |
-| `GET /draft/{id}/state?position=&limit=` | the decision document (typed in `/openapi.json`) |
+| `GET /draft/{id}/state?position=&limit=` | the decision document (typed in `/openapi.json`); `poller` carries the health fields the page renders (`failures_in_a_row`, `last_ok_at`, `runner_error`, `degraded`, `persist.*`) |
 | `POST /draft/{id}/start` `{season, interval_s, forever}` / `stop` | runner lifecycle |
 | `GET /board/config.html`, `PUT /board/config`, `POST /draft/{id}/config?restart=` | tuning |
 | `lazy draft poll --advise`, `lazy draft advise`, `lazy draft fixture` | the CLI equivalents |

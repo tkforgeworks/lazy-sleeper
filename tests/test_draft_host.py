@@ -246,6 +246,13 @@ def test_draft_page_is_self_contained_and_targets_the_state_endpoint(fx: ReplayF
     assert "x&quot;&lt;id&gt;" in html  # escaped in the title/header
     assert all(f'data-pos="{p}"' in html for p in POSITIONS) and 'data-pos="ALL"' in html
     assert "name='viewport'" in html and "/board.html?season=2026" in html
+    # LS-63: health is ungated, the table gate only moves forward and resets per runner
+    assert "drawClock(st);drawHealth(st);" in html and "st.recompute.seq>lastSeq" in html
+    assert "if(run!==lastRun){lastRun=run;lastSeq=-1;}" in html and "if(inflight)return" in html
+    assert "runner_error" in html and "failures_in_a_row" in html and "persist" in html
+    # LS-67: scroll wrapper, sticky thead, wake-up tick, thumb-sized buttons
+    assert '<div class="wrap">' in html and "thead th{position:sticky;top:0" in html
+    assert "visibilitychange" in html and "min-height:36px" in html
 
 
 def test_api_serves_the_fallback_page_for_any_draft_and_the_configured_one(

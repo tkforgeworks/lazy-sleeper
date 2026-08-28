@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.1.1 — draft-2026 fixes (unreleased)
+
+The six bugs from the 2026-08-26 architecture review of 0.1.0, all on the live-draft path.
+
+- **Draft advice keeps flowing during a database outage** — snapshots and `core.draft_picks` are
+  written by a background `Persister` that retries and catches up; the poll thread only talks to
+  Sleeper and diffs against its own last payload. `/state.poller` reports the writer (LS-62).
+- **Same-window undo-and-repick no longer leaves the board showing the wrong players** — the pick
+  diff is keyed on `(pick_no, player)` and a re-delivered pick replaces, never double-seats (LS-66).
+- **A consumer error during a poll no longer silently kills the draft runner** — `on_poll` is
+  guarded, a failed rebuild is retried on the next changed poll, and a runner that does die is
+  reported as `runner_error` in `/state` and on the page (LS-64).
+- **Draft polling recovers from network blips in seconds instead of minutes** — its own 5 s,
+  no-retry HTTP client (`DRAFT_HTTP_TIMEOUT_S`), a 15 s backoff cap (`DRAFT_MAX_BACKOFF_S`), and an
+  interval measured poll-start to poll-start (LS-65).
+- **The draft page surfaces poller stalls and restarts instead of freezing on stale data** — clock,
+  status and banner redraw every tick; the table gate only moves forward and resets per runner; one
+  request in flight at a time (LS-63).
+- **Mobile hardening ahead of the real-device pass** — table in its own scroll box, sticky header
+  row, thumb-sized filter buttons, immediate poll on wake; firewall / network-profile / auto-lock
+  notes in the runbook. The on-phone verification checklist itself is still open (LS-67).
+
 ## v0.1.0 — draft-2026 (unreleased)
 
 Everything needed to draft on 2026-09-04: league-exact scoring, a benchmarked consensus board,
