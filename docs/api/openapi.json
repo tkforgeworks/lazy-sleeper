@@ -1197,7 +1197,7 @@
   },
   "info": {
     "title": "Lazy Sleeper API",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "openapi": "3.1.0",
   "paths": {

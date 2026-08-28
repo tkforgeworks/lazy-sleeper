@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.1 — draft-2026 fixes (unreleased)
+## v0.1.1 — draft-2026 fixes (2026-08-28)
 
 The six bugs from the 2026-08-26 architecture review of 0.1.0, all on the live-draft path.
 
@@ -22,7 +22,7 @@ The six bugs from the 2026-08-26 architecture review of 0.1.0, all on the live-d
   row, thumb-sized filter buttons, immediate poll on wake; firewall / network-profile / auto-lock
   notes in the runbook; verified end-to-end on desktop Chrome and a phone over Wi-Fi (LS-67).
 
-## v0.1.0 — draft-2026 (unreleased)
+## v0.1.0 — draft-2026 (2026-08-26)
 
 Everything needed to draft on 2026-09-04: league-exact scoring, a benchmarked consensus board,
 and a live draft companion that recomputes advice on every pick. Built 2026-08-16 → 2026-08-23.
