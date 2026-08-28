@@ -221,8 +221,9 @@ class DraftHost:
         self._make_engine = make_engine
         self._make_poller = make_poller
         self._clock = clock
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # guards _runs and _starting only — never held across I/O
         self._runs: dict[str, Running] = {}
+        self._starting: dict[str, threading.Lock] = {}  # per-draft: one start at a time
 
     def get(self, draft_id: str) -> Running | None:
         return self._runs.get(draft_id)
@@ -239,9 +240,17 @@ class DraftHost:
         interval_s: float | None = None,
     ) -> Running:
         """Build and start; idempotent while a runner for ``draft_id`` is alive. ``interval_s``
-        overrides the poll cadence for this run (the draft-night latency dial)."""
+        overrides the poll cadence for this run (the draft-night latency dial).
+
+        The pre-draft load (``make_engine`` — seconds of DB work, minutes if the DB is wedged,
+        LS-69) runs under a *per-draft* lock: two starts for the same draft still serialize (the
+        second returns the first's runner), but a slow start for one draft never blocks another.
+        """
         with self._lock:
-            cur = self._runs.get(draft_id)
+            starting = self._starting.setdefault(draft_id, threading.Lock())
+        with starting:
+            with self._lock:
+                cur = self._runs.get(draft_id)
             if cur is not None and cur.runner.running and not cur.runner.stop.is_set():
                 return cur  # a stopped runner may still be flushing its writes; don't wait on it
             engine = self._make_engine(draft_id, season)
@@ -253,7 +262,8 @@ class DraftHost:
                 draft_id, season, engine, runner, started_at=self._clock() if self._clock else None
             )
             runner.start()
-            self._runs[draft_id] = run
+            with self._lock:
+                self._runs[draft_id] = run
             return run
 
     def stop(self, draft_id: str, *, timeout: float = 10.0) -> Running | None:

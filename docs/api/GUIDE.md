@@ -20,6 +20,13 @@ shapes of the endpoints that return untyped JSON, and what the fields actually m
    a few seconds) and starts polling Sleeper on a background thread. Idempotent while the
    runner is alive; `already_running: true` in the response tells you it was. `my_slot` may be
    `null` early — Sleeper often fills `draft_order` late; the runner picks it up mid-draft.
+   **Timeouts to expect:** a healthy `start` answers in a few seconds (the board build). Give
+   it a client timeout of ~60 s. If the database is unreachable the server answers **503**
+   `{"detail": "database unavailable: …"}` within its own bounds — 10 s to connect
+   (`DB_CONNECT_TIMEOUT_S`) and 30 s per statement (`DB_STATEMENT_TIMEOUT_MS`) — it never
+   hangs; the same 503 comes from `GET /board` and `/board/config`. Starts for different
+   drafts don't queue behind each other; a second `start` for the *same* draft waits for the
+   first and returns its runner.
 2. **Poll** `GET /draft/{draft_id}/state?limit=40` every ~2 s. **Redraw only when
    `recompute.seq` changes** — the sequence number increments once per recompute, so an
    unchanged `seq` means nothing new. (The built-in fallback page does exactly this.)

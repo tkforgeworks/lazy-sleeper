@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     draft_http_timeout_s: float = 5.0
     draft_max_backoff_s: float = 15.0
 
+    # The DB pool (LS-69): Supavisor drops idle sockets silently and Windows then takes ~15 min
+    # of TCP retransmits to notice, during which every DB-touching request blocks. Recycle
+    # pooled connections before that idle window, keep the socket alive, and bound how long a
+    # connect or a single statement may take. 0 disables the statement timeout.
+    db_pool_recycle_s: int = 300
+    db_connect_timeout_s: int = 10
+    db_keepalives_idle_s: int = 30
+    db_keepalives_interval_s: int = 10
+    db_keepalives_count: int = 3
+    db_statement_timeout_ms: int = 30_000
+
     @property
     def supabase_enabled(self) -> bool:
         return bool(self.supabase_url and self.supabase_secret_key)

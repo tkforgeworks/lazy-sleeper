@@ -157,7 +157,7 @@ def test_host_start_is_idempotent_while_running_and_restarts_after(fx: ReplayFix
     assert not a.runner.running and host.state(fx.draft_id)["running"] is False
     c = host.start(fx.draft_id, 2026)
     assert c is not a and rp.engines == 2
-    host.stop_all()
+    host.stop_all(timeout=0.1)
     gate.set()
     c.runner.join(5)
 
@@ -168,7 +168,7 @@ def test_host_start_is_idempotent_while_running_and_restarts_after(fx: ReplayFix
 @pytest.fixture
 def client(fx: ReplayFixture) -> TestClient:
     app = create_app(
-        Settings(database_url="postgresql+psycopg://x:y@localhost:1/none"),
+        Settings(database_url="postgresql+psycopg://x:y@127.0.0.1:1/none", db_connect_timeout_s=1),
         draft_host=_Replay(fx).host(),
     )
     return TestClient(app)
@@ -426,3 +426,57 @@ def test_state_exposes_a_dead_runner(fx: ReplayFixture, monkeypatch: pytest.Monk
     st = host.state(fx.draft_id)
     assert st["poller"]["runner_error"] == "RuntimeError: poller bug" and st["running"] is False
     assert run.error == "RuntimeError: poller bug"
+
+
+# --- LS-69: a wedged database must not hang the API or serialize starts --------------------------
+
+
+def test_db_unreachable_is_a_503_not_a_hang(client: TestClient) -> None:
+    """The client fixture points at a refused port: the DB-touching routes answer 503 with a
+    clear detail (the handler is what turns the timeout into a response); non-DB routes are
+    unaffected."""
+    for path in ("/board?limit=1", "/board/config"):
+        r = client.get(path)
+        assert r.status_code == 503, path
+        assert r.json()["detail"].startswith("database unavailable: ")
+    assert client.get("/draft").status_code == 200
+
+
+def test_start_reports_db_failure_as_503(fx: ReplayFixture) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    def broken_engine(draft_id: str, season: int) -> DraftEngine:
+        raise OperationalError("select 1", None, ConnectionRefusedError("connection refused"))
+
+    rp = _Replay(fx)
+    host = DraftHost(broken_engine, rp.poller)
+    app = create_app(
+        Settings(database_url="postgresql+psycopg://x:y@127.0.0.1:1/none"), draft_host=host
+    )
+    r = TestClient(app).post(f"/draft/{fx.draft_id}/start", json={"season": 2026})
+    assert r.status_code == 503 and "connection refused" in r.json()["detail"]
+    assert host.get(fx.draft_id) is None
+
+
+def test_slow_start_for_one_draft_does_not_block_another(fx: ReplayFixture) -> None:
+    rp = _Replay(fx, gate=threading.Event())
+    release = threading.Event()
+    entered = threading.Event()
+
+    def engine(draft_id: str, season: int) -> DraftEngine:
+        if draft_id == "slow":
+            entered.set()
+            assert release.wait(10)
+        return rp.engine(draft_id, season)
+
+    host = DraftHost(engine, rp.poller)
+    t = threading.Thread(target=host.start, args=("slow", 2026), daemon=True)
+    t.start()
+    assert entered.wait(5)
+    fast = host.start(fx.draft_id, 2026)  # returns while "slow" is still inside make_engine
+    assert fast.runner.running and t.is_alive() and host.get("slow") is None
+    release.set()
+    t.join(10)
+    assert host.get("slow") is not None and host.ids() == [fx.draft_id, "slow"]
+    host.stop_all(timeout=0.1)
+    rp.gate.set()
