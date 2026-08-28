@@ -480,3 +480,65 @@ def test_slow_start_for_one_draft_does_not_block_another(fx: ReplayFixture) -> N
     assert host.get("slow") is not None and host.ids() == [fx.draft_id, "slow"]
     host.stop_all(timeout=0.1)
     rp.gate.set()
+
+
+# --- LS-70: a missing draft stops its runner; shutdown stops every runner ------------------------
+
+
+def _forever_host(fx: ReplayFixture) -> tuple[_Replay, DraftHost]:
+    """A runner that keeps polling (replay exhausted → retry loop) until it is told to stop."""
+    import time
+
+    rp = _Replay(fx)
+
+    def poller(draft_id: str) -> DraftPoller:
+        return DraftPoller(ReplaySource(fx), rp.sink, draft_id, sleep=lambda _s: time.sleep(0.02))
+
+    return rp, DraftHost(rp.engine, poller)
+
+
+def test_missing_draft_stops_the_runner_and_the_api_reports_it(fx: ReplayFixture) -> None:
+    from lazy_sleeper.draft.poller import DraftNotFound
+
+    class Missing:
+        def picks(self) -> None:
+            raise DraftNotFound("draft 1234 not found on Sleeper (404)")
+
+        def draft(self) -> None:
+            return None
+
+    rp = _Replay(fx)
+    host = DraftHost(
+        rp.engine, lambda did: DraftPoller(Missing(), rp.sink, did, sleep=lambda _s: None)
+    )
+    app = create_app(
+        Settings(database_url="postgresql+psycopg://x:y@127.0.0.1:1/none"), draft_host=host
+    )
+    c = TestClient(app)
+    assert c.post("/draft/1234/start", json={"season": 2026}).status_code == 200
+    host.get("1234").runner.join(10)
+    assert c.get("/draft").json() == [{"draft_id": "1234", "running": False, "season": 2026}]
+    st = c.get("/draft/1234/state").json()
+    assert st["running"] is False
+    assert st["poller"]["runner_error"] == "DraftNotFound: draft 1234 not found on Sleeper (404)"
+    assert st["poller"]["summary"]["fatal"] == st["poller"]["runner_error"]
+    assert st["poller"]["failures_in_a_row"] == 2 and st["poller"]["summary"]["polls"] == 0
+
+
+def test_app_shutdown_stops_live_runners(fx: ReplayFixture) -> None:
+    import time
+
+    _rp, host = _forever_host(fx)
+    app = create_app(
+        Settings(database_url="postgresql+psycopg://x:y@127.0.0.1:1/none"), draft_host=host
+    )
+    with TestClient(app) as c:  # runs the lifespan: shutdown fires on exit
+        r = c.post(f"/draft/{fx.draft_id}/start", json={"season": 2026, "forever": True})
+        assert r.json()["running"] is True
+        run = host.get(fx.draft_id)
+        time.sleep(0.2)
+        assert run.runner.running
+        t0 = time.monotonic()
+    assert time.monotonic() - t0 < 5
+    assert run.runner.stop.is_set() and not run.runner.running
+    assert run.runner.summary is not None and run.runner.summary.stopped

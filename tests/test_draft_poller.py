@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from lazy_sleeper.draft.poller import (
+    DraftNotFound,
     DraftPoller,
     MemorySink,
     Persister,
@@ -420,3 +421,69 @@ def test_interval_wait_is_compensated_for_the_poll_duration(fx: ReplayFixture) -
     p, _, sleeps = _poller(fx, Slow(fx, counts=[40, 40, 40, 40]), clock=clock)
     p.run(max_polls=4, until_complete=False)
     assert sleeps == [pytest.approx(3.7), pytest.approx(3.7), 0.0]
+
+
+# --- LS-70: a missing draft is fatal, not retried forever -----------------------------------
+
+
+class _Missing:
+    """Sleeper says 404 for the draft itself: ``picks`` raises DraftNotFound every time."""
+
+    def __init__(self, inner: ReplaySource | None = None, times: int | None = None) -> None:
+        self._inner, self._times = inner, times
+
+    def picks(self) -> Pulled:
+        if self._times is None or self._times > 0:
+            if self._times:
+                self._times -= 1
+            raise DraftNotFound("draft 1234 not found on Sleeper (404 from .../draft/1234/picks)")
+        assert self._inner is not None
+        return self._inner.picks()
+
+    def draft(self) -> bytes | None:
+        return None if self._inner is None else self._inner.draft()
+
+
+def test_missing_draft_stops_after_one_retry_with_a_fatal_summary(fx: ReplayFixture) -> None:
+    p, _, sleeps = _poller(fx, _Missing())
+    summary = p.run(until_complete=False)
+    assert sleeps == [10.0]  # one backoff, then give up — no second retry, no forever loop
+    assert summary.failures == 2 and summary.polls == 0 and not summary.stopped
+    assert summary.fatal is not None and summary.fatal.startswith("DraftNotFound: draft 1234")
+    assert p.last_error == summary.fatal and p.failures_in_a_row == 2
+
+
+def test_a_single_404_is_retried_and_forgiven(fx: ReplayFixture) -> None:
+    p, _, sleeps = _poller(fx, _Missing(ReplaySource(fx, counts=[40, 58]), times=1))
+    summary = p.run(max_polls=2, until_complete=False)
+    assert summary.fatal is None and summary.polls == 2 and summary.events == 58
+    assert sleeps == [10.0, 5.0] and p.failures_in_a_row == 0 and p.last_error is None
+
+
+def test_transient_errors_still_back_off_and_never_go_fatal(fx: ReplayFixture) -> None:
+    p, _, sleeps = _poller(fx, _Flaky(ReplaySource(fx, counts=[40]), fail=4))
+    summary = p.run(max_polls=1, until_complete=False)
+    assert summary.fatal is None and summary.failures == 4 and summary.polls == 1
+    assert sleeps == [10.0, 15.0, 15.0, 15.0]
+
+
+def test_sleeper_source_maps_404_to_draft_not_found_and_leaves_5xx_alone() -> None:
+    import httpx
+
+    from lazy_sleeper.draft.poller import SleeperPickSource
+    from lazy_sleeper.ingest.http import HttpClient
+    from lazy_sleeper.ingest.sleeper import SleeperClient
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        code = 404 if req.url.path.startswith("/v1/draft/1234") else 503
+        return httpx.Response(code, json=None)
+
+    http = HttpClient(retries=0, delay_ms=0, transport=httpx.MockTransport(handler))
+    missing = SleeperPickSource(SleeperClient(http), "1234")
+    with pytest.raises(DraftNotFound, match="draft 1234 not found on Sleeper"):
+        missing.picks()
+    with pytest.raises(DraftNotFound):
+        missing.draft()
+    flaky = SleeperPickSource(SleeperClient(http), "9999")
+    with pytest.raises(httpx.HTTPStatusError):  # the transient path is unchanged
+        flaky.picks()

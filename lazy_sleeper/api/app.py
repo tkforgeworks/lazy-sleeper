@@ -6,7 +6,8 @@ LS-37 `/draft/{id}/state.html` + `/draft.html` — the draft-night fallback page
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
@@ -281,7 +282,14 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
             max_backoff_s=settings.draft_max_backoff_s,
         ).host()  # fmt: skip
 
-    app = FastAPI(title="Lazy Sleeper API", version="0.1.1")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        yield
+        # LS-70: graceful shutdown signals every draft runner to stop and waits a few seconds
+        # for each, so Ctrl-C on `lazy serve` never sits behind a polling thread
+        host.stop_all(timeout=5.0)
+
+    app = FastAPI(title="Lazy Sleeper API", version="0.1.1", lifespan=lifespan)
     app.state.draft_host = host
 
     @app.exception_handler(OperationalError)

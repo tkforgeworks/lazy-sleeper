@@ -445,6 +445,9 @@ def serve(
         port=port,
         log_level="warning" if quiet else "info",
         access_log=not quiet,
+        # LS-70: a request stuck in a slow handler must not hold Ctrl-C hostage; the lifespan
+        # shutdown then stops the draft runners (≤ 5 s) — well inside 10 s all told
+        timeout_graceful_shutdown=4,
     )
 
 

@@ -348,6 +348,10 @@ class DraftRunner:
             self.error = f"{type(exc).__name__}: {exc}"
             log.exception("draft runner died")
             raise
+        if self.summary.fatal:
+            # LS-70: the poller gave up (the draft id doesn't exist on Sleeper) — surface it the
+            # same way as a dead thread so /state and the page show why nothing is happening
+            self.error = self.summary.fatal
         return self.summary
 
     def start(self) -> threading.Thread:

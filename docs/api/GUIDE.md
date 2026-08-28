@@ -43,6 +43,12 @@ shapes of the endpoints that return untyped JSON, and what the fields actually m
    that does step 1.
 5. The runner stops itself when the draft completes (`clock.complete`, `poller.status`
    `"complete"`); `POST /draft/{draft_id}/stop` stops it manually (404 if not running).
+6. **A wrong draft id is not retried forever.** `start` itself succeeds (it doesn't call
+   Sleeper), but if Sleeper answers 404 for `/draft/{id}` or its picks the runner retries once
+   and stops: `GET /draft` shows `running: false`, and `/state` carries the reason in
+   `poller.runner_error` (also `poller.summary.fatal`). Transient errors (timeouts, 5xx) keep
+   the usual capped backoff and `poller.failures_in_a_row` — the runner stays up. Stopping the
+   server (`Ctrl-C` on `lazy serve`) stops every runner within a few seconds.
 
 `position` and `limit` filtering can be done server-side (query params) or client-side —
 the fallback page filters client-side so position tabs don't cost a request.

@@ -7,6 +7,11 @@
   (10 s) and statement (30 s) timeouts (`DB_*` settings); an unreachable database answers **503**
   `database unavailable: …` from `POST /draft/{id}/start`, `GET /board` and `/board/config`
   instead of blocking, and one slow start no longer serializes starts for other drafts (LS-69).
+- **A runner started for a nonexistent draft no longer retries forever or blocks shutdown** — a
+  Sleeper 404 for the draft is retried once and then stops the runner (`running: false`,
+  `poller.runner_error` says why); transient errors keep the capped backoff. `lazy serve` stops
+  every runner from the lifespan shutdown and caps in-flight requests at 4 s, so Ctrl-C finishes
+  in seconds (LS-70).
 
 ## v0.1.1 — draft-2026 fixes (2026-08-28)
 

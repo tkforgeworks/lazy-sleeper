@@ -328,6 +328,7 @@ class DraftHost:
                     "failures": run.runner.summary.failures,
                     "complete": run.runner.summary.complete,
                     "stopped": run.runner.summary.stopped,
+                    "fatal": run.runner.summary.fatal,
                 }
             ),
         }
