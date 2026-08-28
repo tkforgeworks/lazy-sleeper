@@ -95,6 +95,10 @@ class _Ctx:
             retries=self.settings.http_retries,
             delay_ms=self.settings.http_delay_ms,
         )
+        # the draft poll's client (LS-65): fail fast, no courtesy pause, the poller retries
+        self.draft_http = HttpClient(
+            timeout_s=self.settings.draft_http_timeout_s, retries=0, delay_ms=0
+        )
         self.engine = make_engine(self.settings)
         self.sessions = make_session_factory(self.engine)
         self.store = _store(self.settings)
@@ -1327,13 +1331,15 @@ def sync_pull(dry_run: bool = typer.Option(False, help="Report only")) -> None:
 # --- draft (M4) ------------------------------------------------------------
 
 
-def _draft_factory(ctx: _Ctx, interval: float = 5.0, max_backoff: float = 60.0):  # noqa: ANN202
-    """Production draft wiring shared with the API (LS-35): `DbDraftFactory`."""
+def _draft_factory(ctx: _Ctx, interval: float = 2.0, max_backoff: float | None = None):  # noqa: ANN202
+    """Production draft wiring shared with the API (LS-35): `DbDraftFactory` on the draft HTTP
+    client; the backoff cap defaults to `Settings.draft_max_backoff_s` (LS-65)."""
     from lazy_sleeper.draft.host import DbDraftFactory
 
     return DbDraftFactory(
-        ctx.sessions, ctx.store, SleeperClient(ctx.http), ctx.provider, ctx.puller, ctx.settings,
-        interval_s=interval, max_backoff_s=max_backoff,
+        ctx.sessions, ctx.store, SleeperClient(ctx.draft_http), ctx.provider, ctx.puller,
+        ctx.settings, interval_s=interval,
+        max_backoff_s=ctx.settings.draft_max_backoff_s if max_backoff is None else max_backoff,
     )  # fmt: skip
 
 
@@ -1446,7 +1452,9 @@ def _draft_log_file(draft_id: str) -> Path:
 def draft_poll(
     draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
     interval: float = typer.Option(2.0, help="Seconds between polls"),
-    max_backoff: float = typer.Option(60.0, help="Cap on the error backoff, seconds"),
+    max_backoff: float | None = typer.Option(
+        None, help="Cap on the error backoff, seconds (default DRAFT_MAX_BACKOFF_S = 15)"
+    ),
     once: bool = typer.Option(False, help="Poll a single time and exit"),
     forever: bool = typer.Option(False, help="Keep polling after the draft reports complete"),
     advise: bool = typer.Option(False, help="Print my top picks whenever I'm on the clock (LS-33)"),
@@ -1467,7 +1475,9 @@ def draft_poll(
     did = draft_id or ctx.settings.sleeper_draft_id
     me = ctx.settings.sleeper_user_id
     log_path = _draft_log_file(did)
-    source = SleeperPickSource(SleeperClient(ctx.http), did)
+    if max_backoff is None:
+        max_backoff = ctx.settings.draft_max_backoff_s
+    source = SleeperPickSource(SleeperClient(ctx.draft_http), did)
     poller = DraftPoller(
         source,
         DbPickSink(ctx.sessions, did, ctx.puller),

@@ -24,6 +24,7 @@ from lazy_sleeper.board.tiers import BoardRow
 from lazy_sleeper.draft.engine import Advice, DraftEngine, DraftRunner, load_board_context
 from lazy_sleeper.draft.poller import (
     DEFAULT_INTERVAL_S,
+    DEFAULT_MAX_BACKOFF_S,
     DbPickSink,
     DraftPoller,
     SleeperPickSource,
@@ -331,6 +332,8 @@ class DbDraftFactory:
 
     ``provider(session, name)`` is the one place provider names resolve (``_Ctx.provider`` /
     ``providers.make_provider``); ``puller(session)`` builds the snapshot-writing ``Puller``.
+    ``sleeper`` should be a ``SleeperClient`` on the *draft* ``HttpClient`` (short timeout, no
+    retries — ``Settings.draft_http_timeout_s``, LS-65), not the daily-pull one.
     """
 
     def __init__(  # noqa: PLR0913
@@ -343,7 +346,7 @@ class DbDraftFactory:
         settings,  # noqa: ANN001 — Settings
         *,
         interval_s: float = DEFAULT_INTERVAL_S,
-        max_backoff_s: float = 60.0,
+        max_backoff_s: float = DEFAULT_MAX_BACKOFF_S,
         provider_name: str = "ensemble",
     ) -> None:
         self._sessions = sessions

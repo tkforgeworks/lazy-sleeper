@@ -30,6 +30,7 @@ def fx() -> ReplayFixture:
 def _poller(fx: ReplayFixture, source, **kw) -> tuple[DraftPoller, MemorySink, list[float]]:  # noqa: ANN001
     sink = MemorySink(fx.draft_id)
     sleeps: list[float] = []
+    kw.setdefault("clock", lambda: 0.0)  # polls take no time unless a test says otherwise
     p = DraftPoller(
         source, sink, fx.draft_id, sleep=sleeps.append, rng=lambda: 0.0, interval_s=5.0, **kw
     )
@@ -192,7 +193,8 @@ def test_backoff_jitter_is_bounded() -> None:
     hi = DraftPoller(src, sink, "x", rng=lambda: 1.0, interval_s=5.0)
     lo = DraftPoller(src, sink, "x", rng=lambda: 0.0, interval_s=5.0)
     assert lo.backoff(1) == 10.0 and hi.backoff(1) == 12.5
-    assert lo.backoff(10) == 60.0  # capped
+    assert lo.backoff(10) == 15.0  # capped: a dead network blinds the draft for ≤ 15 s (LS-65)
+    assert DraftPoller(src, sink, "x", rng=lambda: 0.0, max_backoff_s=60).backoff(10) == 60.0
 
 
 def test_on_pick_exception_does_not_kill_the_loop(fx: ReplayFixture) -> None:
@@ -397,3 +399,24 @@ def test_on_poll_exception_does_not_kill_the_loop(fx: ReplayFixture) -> None:
     assert (
         summary.complete and summary.events == 180 and len(polls) == 12
     )  # polls after the bug ran
+
+
+# --- cadence (LS-65) ---------------------------------------------------------
+
+
+def test_interval_wait_is_compensated_for_the_poll_duration(fx: ReplayFixture) -> None:
+    """interval_s is poll-start to poll-start: a 1.3 s fetch leaves a 3.7 s wait at 5 s, and a
+    fetch slower than the interval waits 0 (never negative). Backoff waits are not compensated."""
+    now = [0.0]
+
+    def clock() -> float:
+        return now[0]
+
+    class Slow(ReplaySource):
+        def picks(self) -> Pulled:
+            now[0] += 1.3 if self._i < 2 else 7.0
+            return super().picks()
+
+    p, _, sleeps = _poller(fx, Slow(fx, counts=[40, 40, 40, 40]), clock=clock)
+    p.run(max_polls=4, until_complete=False)
+    assert sleeps == [pytest.approx(3.7), pytest.approx(3.7), 0.0]

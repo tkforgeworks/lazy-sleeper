@@ -54,7 +54,9 @@ from lazy_sleeper.ingest.validate import validate_json_any
 log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_S = 2.0  # Sleeper tolerates this; 5 s + page refresh felt slow on the clock
-DEFAULT_MAX_BACKOFF_S = 60.0
+DEFAULT_MAX_BACKOFF_S = (
+    15.0  # LS-65: worst-case blind window after a blip, well inside a pick clock
+)
 
 OnPick = Callable[["PickEvent"], None]
 
@@ -443,6 +445,7 @@ class DraftPoller:
         flush_timeout_s: float = 10.0,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] = random.random,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._source = source
         self._sink = sink
@@ -454,6 +457,7 @@ class DraftPoller:
         self.flush_timeout_s = flush_timeout_s
         self._sleep = sleep
         self._rng = rng
+        self._clock = clock
         self._seq = 0
         self._last_sha: str | None = None
         self._last_count = 0
@@ -600,6 +604,7 @@ class DraftPoller:
         try:
             while not stop.is_set():
                 self.last_poll_at = datetime.now(UTC)
+                t0 = self._clock()
                 try:
                     result = self.poll_once()
                 except Exception as exc:  # noqa: BLE001 — the loop must survive anything
@@ -661,14 +666,18 @@ class DraftPoller:
                     break
                 if max_polls is not None and summary.polls >= max_polls:
                     break
-                wait(self.interval_s)
+                # the interval is poll-start to poll-start: the fetch's own duration comes off
+                # the wait so the cadence tracks interval_s (measured 5.6 s at 2 s before LS-65)
+                wait(max(0.0, self.interval_s - (self._clock() - t0)))
             summary.stopped = stop.is_set()
         finally:
             self.persist.close(self.flush_timeout_s)
         return summary
 
     def backoff(self, failures: int) -> float:
-        """interval × 2^failures, capped, with up to +25 % jitter so retries don't align."""
+        """interval × 2^failures, capped at ``max_backoff_s`` (15 s by default — a dead network
+        must not blind the draft for a pick clock), with up to +25 % jitter so retries don't
+        align."""
         base = min(self.interval_s * (2**failures), self.max_backoff_s)
         return base * (1.0 + 0.25 * self._rng())
 

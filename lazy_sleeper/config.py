@@ -28,12 +28,18 @@ class Settings(BaseSettings):
     sleeper_user_id: str = "1268591266036203520"
     my_draft_slot: int | None = None  # override when Sleeper assigns draft_order late (LS-32)
 
-    # Be polite to undocumented endpoints.
+    # Be polite to undocumented endpoints (the daily pull).
     http_timeout_s: float = 60.0
     http_retries: int = 3
     http_delay_ms: int = Field(
         default=250, description="Pause between sequential calls to one host"
     )
+
+    # The draft poll (LS-65): a 120 s pick clock can't absorb 60 s timeouts × 3 retries. Sleeper
+    # answers in well under a second when healthy; a dead network must surface in seconds and
+    # the poller's own capped backoff owns the retrying.
+    draft_http_timeout_s: float = 5.0
+    draft_max_backoff_s: float = 15.0
 
     @property
     def supabase_enabled(self) -> bool:
