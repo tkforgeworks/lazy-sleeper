@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased — 0.1.2
+## v0.1.2 — draft-2026 hardening + Flutter contract (2026-08-28)
+
+The four `be/0.1.2` tickets: two reliability bugs found while wiring the Flutter client, and the
+two API additions the Draft Command Center design needed. Alembic head `0014`.
 
 - **The API no longer hangs for minutes on a stale database connection after idle** — pooled
   connections are recycled every 5 min, kept alive with TCP keepalives, and bounded by connect
