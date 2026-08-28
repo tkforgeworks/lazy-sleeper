@@ -47,6 +47,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
+
 from lazy_sleeper.ingest.league_loaders import parse_draft, parse_picks
 from lazy_sleeper.ingest.snapshots import SnapshotKey
 from lazy_sleeper.ingest.validate import validate_json_any
@@ -59,6 +61,13 @@ DEFAULT_MAX_BACKOFF_S = (
 )
 
 OnPick = Callable[["PickEvent"], None]
+
+
+class DraftNotFound(RuntimeError):
+    """Sleeper answered 404 for the draft itself (LS-70). Unlike a timeout or a 5xx this cannot
+    clear up by waiting: ``run`` retries it once (a freshly created draft may lag) and then stops
+    with ``RunSummary.fatal`` set instead of backing off forever."""
+
 
 # --- data ------------------------------------------------------------------
 
@@ -99,6 +108,7 @@ class RunSummary:
     events: int = 0
     complete: bool = False
     stopped: bool = False
+    fatal: str | None = None  # the run ended on an unrecoverable error (DraftNotFound)
 
 
 @dataclass(frozen=True)
@@ -149,10 +159,21 @@ class SleeperPickSource:
         self._draft_id = draft_id
 
     def picks(self) -> Pulled:
-        return Pulled(self._sleeper.draft_picks(self._draft_id), datetime.now(UTC))
+        return Pulled(self._get(self._sleeper.draft_picks), datetime.now(UTC))
 
     def draft(self) -> bytes | None:
-        return self._sleeper.draft(self._draft_id)
+        return self._get(self._sleeper.draft)
+
+    def _get(self, fn: Callable[[str], bytes]) -> bytes:
+        """A 404 on either endpoint means the draft id is wrong — fatal, not retryable."""
+        try:
+            return fn(self._draft_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise DraftNotFound(
+                    f"draft {self._draft_id} not found on Sleeper (404 from {exc.request.url})"
+                ) from exc
+            raise
 
 
 class DbPickSink:
@@ -601,12 +622,28 @@ class DraftPoller:
         wait = self._sleep or stop.wait
         summary = RunSummary()
         failures = 0
+        not_found = 0
         try:
             while not stop.is_set():
                 self.last_poll_at = datetime.now(UTC)
                 t0 = self._clock()
                 try:
                     result = self.poll_once()
+                except DraftNotFound as exc:
+                    # LS-70: one retry, then stop — a missing draft never comes back by waiting
+                    failures += 1
+                    not_found += 1
+                    summary.failures += 1
+                    self.failures_in_a_row = failures
+                    self.last_error = f"{type(exc).__name__}: {exc}"
+                    if not_found > 1:
+                        summary.fatal = self.last_error
+                        log.error("%s; stopping the poll (not retryable)", exc)
+                        break
+                    delay = self.backoff(failures)
+                    log.warning("poll failed (%s); retrying once in %.1fs", self.last_error, delay)
+                    wait(delay)
+                    continue
                 except Exception as exc:  # noqa: BLE001 — the loop must survive anything
                     failures += 1
                     summary.failures += 1
@@ -623,6 +660,7 @@ class DraftPoller:
                     continue
 
                 failures = 0
+                not_found = 0
                 self.failures_in_a_row = 0
                 self.last_error = None
                 self.last_ok_at = datetime.now(UTC)
@@ -686,6 +724,7 @@ __all__ = [
     "DEFAULT_INTERVAL_S",
     "DEFAULT_MAX_BACKOFF_S",
     "DbPickSink",
+    "DraftNotFound",
     "DraftPoller",
     "MemorySink",
     "OnPick",
