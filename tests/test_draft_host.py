@@ -583,6 +583,9 @@ def test_state_payload_has_clock_team_name_and_recent_picks(fx: ReplayFixture) -
 
 def test_api_state_types_the_clock_and_feed(client: TestClient, fx: ReplayFixture) -> None:
     assert client.post(f"/draft/{fx.draft_id}/start", json={"season": 2026}).status_code == 200
+    # the fixture's pick_timer arrives with the runner's first draft-doc read: wait for the
+    # replay to finish so the assertion doesn't race the thread (it did on CI)
+    client.app.state.draft_host.get(fx.draft_id).runner.join(30)
     r = client.get(f"/draft/{fx.draft_id}/state?limit=1")
     assert r.status_code == 200
     body = r.json()
