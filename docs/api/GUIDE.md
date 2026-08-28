@@ -46,7 +46,8 @@ shapes of the endpoints that return untyped JSON, and what the fields actually m
      Sleeper's own `last_picked` when the doc refresh caught it — so the countdown can run up
      to ~2 s behind Sleeper's, never ahead. Panic threshold `my_turn && seconds_remaining ≤ 30`.
    - `recent_picks` is the league-wide feed: the last 8 picks, most recent first —
-     `{pick_no, slot, team_name, sleeper_id, name, position}` (`team_name` null like above).
+     `RecentPickOut {pick_no, slot, team_name, sleeper_id, name, position}` (`team_name` null
+     like above). Rows (`DraftRowOut`) also carry `bye` — see the glossary.
    - `my_roster` drives the needs view: `open_starters` (position → open seats), `open_flex`,
      `open_bench`, `picks` with their `seat`.
    - `rows` is the decision table, best pick first by `pick_score`. `rank` is the *overall*

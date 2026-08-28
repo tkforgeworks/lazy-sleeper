@@ -305,7 +305,7 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
         # for each, so Ctrl-C on `lazy serve` never sits behind a polling thread
         host.stop_all(timeout=5.0)
 
-    app = FastAPI(title="Lazy Sleeper API", version="0.1.1", lifespan=lifespan)
+    app = FastAPI(title="Lazy Sleeper API", version="0.1.2", lifespan=lifespan)
     app.state.draft_host = host
 
     @app.exception_handler(OperationalError)

@@ -15,7 +15,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 - **Done:** LS-10–15, 17–37 (PRs #1–#30). 296 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
-- **0.1.2 (be/0.1.2, 2026-08-28, PRs #42–#45):** **LS-69** DB pool hardening — `make_engine`
+- **0.1.2 (be/0.1.2, 2026-08-28, PRs #42–#45; tagged `v0.1.2` = the draft-night code):** **LS-69** DB pool hardening — `make_engine`
   sets `pool_recycle` 300 s, libpq keepalives + `connect_timeout` 10 s (`DB_*` settings) and
   `SET statement_timeout` (30 s) per new connection via a `connect` event (committed; Supavisor
   drops the `options` startup param — verified live); `OperationalError` → **503** `database
