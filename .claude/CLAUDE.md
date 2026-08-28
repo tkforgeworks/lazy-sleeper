@@ -35,8 +35,8 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   on `seq > lastSeq`, gate reset on 404 / start / `poller.started_at` change, one fetch in flight,
   staleness from the client clock; layout = flex column, table in `.wrap{overflow:auto}` with
   sticky `thead`, 36 px buttons, `visibilitychange` tick. Verified with a Node DOM-shim harness
-  over a real `/state` (12 scenarios) — **the Chrome extension was offline again; LS-67's on-phone
-  checklist is still Tim's to run.** Git commits need the 1Password SSH agent (signing) — it was
+  over a real `/state` (12 scenarios), then in real Chrome (desktop half of the LS-67 checklist,
+  2026-08-28) and by Tim on the phone — **all six 0.1.1 bugs are Done.** Git commits need the 1Password SSH agent (signing) — it was
   not running during this pass, so the work was snapshotted per ticket and committed afterwards.
 - **Next up:** LS-52 snapshot dedup → LS-53 projections latest-wins (Supabase growth), then release
   process / run-without-uv. **LS-38 Tailscale skipped for the draft (Tim drafts from home; may move
