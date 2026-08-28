@@ -195,8 +195,12 @@ class Running:
     engine: DraftEngine
     runner: DraftRunner
     started_at: Any = None
-    error: str | None = None  # the runner thread died with this (poller.run never raises)
     lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def error(self) -> str | None:
+        """Set when the runner thread died with an exception (LS-64); None while healthy."""
+        return self.runner.error
 
 
 class DraftHost:
@@ -294,6 +298,8 @@ class DraftHost:
             "failures_in_a_row": p.failures_in_a_row,
             "last_error": p.last_error,
             "degraded": p.degraded,
+            "runner_error": run.error,
+            "rebuild_pending": run.runner.rebuild_pending,
             "persist": {
                 "pending": p.persist.pending,
                 "applied": p.persist.applied,

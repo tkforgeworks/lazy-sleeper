@@ -257,3 +257,47 @@ def test_runner_delivers_advice_through_a_full_db_outage(fx: ReplayFixture) -> N
     assert summary.complete and summary.events == 180 and summary.failures == 0
     assert eng.state.complete and eng.timing.count >= 180
     assert poller.persist.failures >= 1 and poller.persist.degraded and sink.rows == {}
+
+
+def test_runner_retries_a_failed_rebuild_on_the_next_changed_poll(
+    fx: ReplayFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """LS-64: the undo rebuild raises once (an engine hiccup); the runner thread survives, flags
+    rebuild_pending, and redoes the rebuild from the next changed payload."""
+    sink = MemorySink(fx.draft_id)
+    poller = DraftPoller(
+        ReplaySource(fx, counts=[60, 55, 55, 70, 180]), sink, fx.draft_id, sleep=lambda _s: None
+    )
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)
+    runner = DraftRunner(poller, eng)
+    real = eng.rebuild
+    calls: list[int] = []
+    pending: list[bool] = []
+
+    def flaky(rows, **kw):  # noqa: ANN001, ANN003, ANN202
+        calls.append(len(rows))
+        pending.append(runner.rebuild_pending)
+        if len(calls) == 2:
+            raise RuntimeError("rebuild hiccup")
+        return real(rows, **kw)
+
+    monkeypatch.setattr(eng, "rebuild", flaky)
+    summary = runner.run()
+    assert summary.complete and summary.failures == 0 and runner.error is None
+    # poll 1 (60), the undo (55, raised), the retry on the next *changed* poll (70) — not on the
+    # unchanged one in between — and nothing after
+    assert calls == [60, 55, 70] and pending == [True, True, True]
+    assert not runner.rebuild_pending and eng.state.picks_made == 180
+
+
+def test_runner_records_its_own_death(fx: ReplayFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    runner, _ = _runner(fx)
+
+    def boom(*a, **kw):  # noqa: ANN002, ANN003, ANN202
+        raise RuntimeError("poller bug")
+
+    monkeypatch.setattr(runner.poller, "run", boom)
+    runner.start()
+    runner.join(5)
+    assert not runner.running and runner.summary is None
+    assert runner.error == "RuntimeError: poller bug"

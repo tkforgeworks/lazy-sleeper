@@ -381,3 +381,19 @@ def test_draft_doc_is_persisted_off_thread_too(fx: ReplayFixture) -> None:
     p.run(max_polls=1, until_complete=False)
     assert sink.draft is not None and sink.draft["draft_id"] == fx.draft_id
     assert sink.synced == 1 and len(sink.rows) == 40
+
+
+def test_on_poll_exception_does_not_kill_the_loop(fx: ReplayFixture) -> None:
+    """LS-64: on_poll is guarded like on_pick — the poll thread must outlive a consumer bug."""
+    p, _, _ = _poller(fx, ReplaySource(fx))
+    polls: list[int] = []
+
+    def on_poll(r) -> None:  # noqa: ANN001
+        polls.append(r.poll_seq)
+        if r.poll_seq == 2:
+            raise RuntimeError("consumer bug")
+
+    summary = p.run(on_poll=on_poll)
+    assert (
+        summary.complete and summary.events == 180 and len(polls) == 12
+    )  # polls after the bug ran

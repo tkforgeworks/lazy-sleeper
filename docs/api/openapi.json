@@ -886,6 +886,21 @@
           "persist": {
             "$ref": "#/components/schemas/PersistOut"
           },
+          "rebuild_pending": {
+            "title": "Rebuild Pending",
+            "type": "boolean"
+          },
+          "runner_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runner Error"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -932,6 +947,8 @@
           "failures_in_a_row",
           "last_error",
           "degraded",
+          "runner_error",
+          "rebuild_pending",
           "persist",
           "summary"
         ],

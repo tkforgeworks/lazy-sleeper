@@ -407,3 +407,15 @@ def test_state_reports_poller_health_and_the_writer(fx: ReplayFixture) -> None:
     w = p["persist"]
     assert w["pending"] == 0 and w["applied"] >= 1 and w["failures"] == 0
     assert w["dropped"] == 0 and w["last_error"] is None
+
+
+def test_state_exposes_a_dead_runner(fx: ReplayFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """LS-64: Running.error is the runner's error, and /state carries it."""
+    host = _Replay(fx).host()
+    run = host.start(fx.draft_id, 2026)
+    run.runner.join(30)
+    assert run.error is None and host.state(fx.draft_id)["poller"]["runner_error"] is None
+    monkeypatch.setattr(run.runner, "error", "RuntimeError: poller bug")
+    st = host.state(fx.draft_id)
+    assert st["poller"]["runner_error"] == "RuntimeError: poller bug" and st["running"] is False
+    assert run.error == "RuntimeError: poller bug"

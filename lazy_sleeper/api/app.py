@@ -152,6 +152,8 @@ class PollerOut(BaseModel):
     failures_in_a_row: int  # > 0 = the Sleeper fetch is failing and the poller is backing off
     last_error: str | None
     degraded: bool  # the start-of-run DB read failed; picks were re-emitted from the payload
+    runner_error: str | None  # the runner thread died with this; `running` is then False
+    rebuild_pending: bool  # a state rebuild raised and will be retried on the next changed poll
     persist: PersistOut
     summary: dict[str, Any] | None
 

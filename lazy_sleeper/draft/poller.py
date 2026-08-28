@@ -25,10 +25,10 @@ The poller talks to two narrow ports so it is testable without HTTP or Postgres:
   one session per call; ``MemorySink`` = a dict, for tests).
 
 Events are delivered synchronously on the polling thread, in ``pick_no`` order, to a plain
-callback. A callback that raises is logged and skipped; the recompute loop (LS-34) owns its own
-last-good fallback. Undone picks (commissioner undo) are not events but are listed in
-``PollResult.removed_picks``, and every changed poll carries the full parsed pick list
-(``PollResult.rows``) so consumers rebuild from the payload itself, never from the DB.
+callback. A callback that raises (``on_pick`` or ``on_poll``) is logged and skipped; the
+recompute loop (LS-34) owns its own last-good fallback. Undone picks (commissioner undo) are not
+events but are listed in ``PollResult.removed_picks``, and every changed poll carries the full
+parsed pick list (``PollResult.rows``) so consumers rebuild from the payload, never from the DB.
 """
 
 from __future__ import annotations
@@ -651,7 +651,10 @@ class DraftPoller:
                     except Exception:  # noqa: BLE001
                         log.exception("on_pick failed for pick %d", ev.pick_no)
                 if on_poll is not None:
-                    on_poll(result)
+                    try:
+                        on_poll(result)
+                    except Exception:  # noqa: BLE001 — LS-64: a consumer bug must not end polling
+                        log.exception("on_poll failed on poll %d", result.poll_seq)
                 if until_complete and result.complete:
                     summary.complete = True
                     self._final_refresh()

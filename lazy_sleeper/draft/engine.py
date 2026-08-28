@@ -303,6 +303,8 @@ class DraftRunner:
         self._max_polls = max_polls
         self.stop = threading.Event()
         self.summary: RunSummary | None = None
+        self.error: str | None = None  # set if run() died with an exception (LS-64)
+        self.rebuild_pending = False  # a rebuild raised; redo it on the next changed poll
         self._thread: threading.Thread | None = None
         self._draft_doc: Mapping[str, Any] | None = poller.draft
 
@@ -321,8 +323,10 @@ class DraftRunner:
                 advice = self.engine.recompute()
                 if self._on_advice:
                     self._on_advice(advice)
-        if (r.removed or r.poll_seq == 1) and not r.unchanged:
+        if (r.removed or r.poll_seq == 1 or self.rebuild_pending) and not r.unchanged:
+            self.rebuild_pending = True  # cleared only once the rebuild has gone through
             advice = self.engine.rebuild(r.rows)
+            self.rebuild_pending = False
             if self._on_advice:
                 self._on_advice(advice)
         if self._on_poll:
@@ -330,13 +334,20 @@ class DraftRunner:
 
     def run(self) -> RunSummary:
         """Blocking: poll until complete / stopped. Use :meth:`start` for the background form."""
-        self.summary = self.poller.run(
-            self._pick,
-            on_poll=self._poll,
-            stop=self.stop,
-            until_complete=self._until_complete,
-            max_polls=self._max_polls,
-        )
+        try:
+            self.summary = self.poller.run(
+                self._pick,
+                on_poll=self._poll,
+                stop=self.stop,
+                until_complete=self._until_complete,
+                max_polls=self._max_polls,
+            )
+        except Exception as exc:
+            # poller.run guards every callback, so this is a bug in the poller itself — but the
+            # host must be able to show *that* the thread is gone, not just that it isn't running
+            self.error = f"{type(exc).__name__}: {exc}"
+            log.exception("draft runner died")
+            raise
         return self.summary
 
     def start(self) -> threading.Thread:

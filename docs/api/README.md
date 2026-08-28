@@ -188,6 +188,8 @@ The decision surface: who's on the clock, my roster and needs, and the available
 | `failures_in_a_row` | integer | yes |  |
 | `last_error` | string | null | yes |  |
 | `degraded` | boolean | yes |  |
+| `runner_error` | string | null | yes |  |
+| `rebuild_pending` | boolean | yes |  |
 | `persist` | PersistOut | yes |  |
 | `summary` | dict[str, any] | null | yes |  |
 
