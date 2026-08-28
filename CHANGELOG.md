@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 0.1.2
+
+- **The API no longer hangs for minutes on a stale database connection after idle** — pooled
+  connections are recycled every 5 min, kept alive with TCP keepalives, and bounded by connect
+  (10 s) and statement (30 s) timeouts (`DB_*` settings); an unreachable database answers **503**
+  `database unavailable: …` from `POST /draft/{id}/start`, `GET /board` and `/board/config`
+  instead of blocking, and one slow start no longer serializes starts for other drafts (LS-69).
+
 ## v0.1.1 — draft-2026 fixes (2026-08-28)
 
 The six bugs from the 2026-08-26 architecture review of 0.1.0, all on the live-draft path.

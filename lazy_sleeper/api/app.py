@@ -10,10 +10,11 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from lazy_sleeper.config import Settings, get_settings
@@ -282,6 +283,14 @@ def create_app(settings: Settings | None = None, *, draft_host=None) -> FastAPI:
 
     app = FastAPI(title="Lazy Sleeper API", version="0.1.1")
     app.state.draft_host = host
+
+    @app.exception_handler(OperationalError)
+    def _db_unavailable(_req: Request, exc: OperationalError) -> JSONResponse:
+        """A connect/statement timeout or a refused connection (LS-69): say so in seconds with a
+        503 instead of letting the request hang. The engine's timeouts bound how long this takes
+        (`DB_CONNECT_TIMEOUT_S`, `DB_STATEMENT_TIMEOUT_MS`)."""
+        reason = " ".join(str(exc.orig or exc).split())
+        return JSONResponse({"detail": f"database unavailable: {reason}"}, status_code=503)
 
     @app.get("/health")
     def health() -> dict[str, str]:
