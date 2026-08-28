@@ -183,6 +183,7 @@ class DraftRowOut(BaseModel):
     position: str
     team: str | None
     injury_status: str | None
+    bye: int | None  # the team's bye week; null for free agents / before `lazy pull byes`
     points: float
     vorp: float
     pos_rank: int

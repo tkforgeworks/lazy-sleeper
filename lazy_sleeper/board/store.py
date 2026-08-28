@@ -9,6 +9,7 @@ path (CLI `lazy board regen`, `POST /board/regen`, and the daily workflow all ca
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +22,7 @@ from lazy_sleeper.board.config import BoardConfigRepository
 from lazy_sleeper.board.flags import build_board, latest_adp
 from lazy_sleeper.board.tiers import BoardRow, TierConfig
 from lazy_sleeper.db.models import Board, BoardEntry, Player
+from lazy_sleeper.ingest.byes import bye_of, byes_for
 from lazy_sleeper.providers.base import ProjectionProvider
 from lazy_sleeper.scoring.engine import Scorer
 from lazy_sleeper.scoring.rules import ScoringRules
@@ -32,6 +34,7 @@ ROW_FIELDS = (
     "position",
     "team",
     "injury_status",
+    "bye",
     "points",
     "baseline",
     "vorp",
@@ -49,11 +52,15 @@ ROW_FIELDS = (
 
 
 def flatten(
-    rows: list[BoardRow], players: dict[str, tuple[str | None, str | None]]
+    rows: list[BoardRow],
+    players: dict[str, tuple[str | None, str | None]],
+    byes: Mapping[str, int] | None = None,
 ) -> list[dict[str, Any]]:
-    """BoardRow list (board order) → plain dicts with ``rank``, ``name`` and ``injury_status``.
+    """BoardRow list (board order) → plain dicts with ``rank``, ``name``, ``injury_status`` and
+    ``bye``.
 
     ``players`` maps sleeper_id → (full_name, injury_status); unknown ids keep the id as name.
+    ``byes`` maps team → bye week (LS-57); a player without a team or a schedule gets ``None``.
     """
     out: list[dict[str, Any]] = []
     for rank, r in enumerate(rows, start=1):
@@ -67,6 +74,7 @@ def flatten(
                 "position": v.position,
                 "team": v.team,
                 "injury_status": injury,
+                "bye": bye_of(byes, v.team),
                 "points": v.points,
                 "baseline": v.baseline,
                 "vorp": v.vorp,
@@ -191,7 +199,7 @@ def regenerate(
         provider, shape, season, config, latest_adp(session, season), baselines=baselines
     )
     players = repo.player_info({r.value.sleeper_id for r in board_rows})
-    rows = flatten(board_rows, players)
+    rows = flatten(board_rows, players, byes_for(session, season))
     board = repo.save(
         season=season, provider=provider.name, baseline=baseline, config=config, rows=rows
     )

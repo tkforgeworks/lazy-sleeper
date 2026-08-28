@@ -30,6 +30,7 @@ from lazy_sleeper.draft.poller import (
     SleeperPickSource,
 )
 from lazy_sleeper.draft.state import DraftState, TeamRoster
+from lazy_sleeper.ingest.byes import bye_of
 
 # --- payload ---------------------------------------------------------------------------------
 
@@ -40,6 +41,7 @@ ROW_FIELDS = (
     "position",
     "team",
     "injury_status",
+    "bye",
     "points",
     "vorp",
     "pos_rank",
@@ -70,6 +72,7 @@ def row_dict(
     r: BoardRow,
     names: Mapping[str, str],
     injuries: Mapping[str, str] | None = None,
+    byes: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     v = r.value
     injuries = injuries or {}
@@ -80,6 +83,7 @@ def row_dict(
         "position": v.position,
         "team": v.team,
         "injury_status": injuries.get(v.sleeper_id),
+        "bye": bye_of(byes, v.team),
         "points": v.points,
         "vorp": v.vorp,
         "pos_rank": v.pos_rank,
@@ -163,7 +167,10 @@ def state_payload(
     spec = st.spec
     names = engine.board.names
     otc = st.on_the_clock
-    rows = [row_dict(i, r, names, engine.board.injuries) for i, r in enumerate(a.rows, start=1)]
+    rows = [
+        row_dict(i, r, names, engine.board.injuries, engine.board.byes)
+        for i, r in enumerate(a.rows, start=1)
+    ]
     if position:
         pos = position.upper()
         rows = [r for r in rows if r["position"] == pos]

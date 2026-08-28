@@ -440,6 +440,17 @@
             ],
             "title": "Adp Flag"
           },
+          "bye": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bye"
+          },
           "cliff": {
             "title": "Cliff",
             "type": "boolean"
@@ -558,6 +569,7 @@
           "position",
           "team",
           "injury_status",
+          "bye",
           "points",
           "vorp",
           "pos_rank",

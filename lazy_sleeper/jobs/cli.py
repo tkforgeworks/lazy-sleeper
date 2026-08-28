@@ -156,6 +156,24 @@ def pull_espn(season: int) -> None:
         ctx.puller(s).pull_espn_kona(season)
 
 
+@pull_app.command("byes")
+def pull_byes(
+    season: int = typer.Option(2026, help="Season whose schedule to read"),
+    load: bool = typer.Option(False, help="Also load core.team_byes from the snapshot"),
+) -> None:
+    """Bye weeks from ESPN's pro-team doc (LS-57). Once a season is enough; `--load` fills
+    `core.team_byes`, which the next `lazy board regen` / draft start picks up."""
+    from lazy_sleeper.ingest.byes import load_byes
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        snap = ctx.puller(s).pull_espn_pro_teams(season)
+        typer.echo(f"snapshot {snap.id}: {snap.record_count} pro teams (valid={snap.valid})")
+        if load:
+            n = load_byes(s, ctx.store.read(snap.storage_path), season, snap.id)
+            typer.echo(f"loaded {n} team byes for {season}")
+
+
 @pull_app.command("league")
 def pull_league(
     draft_id: str | None = typer.Option(None, help="Override the configured draft (e.g. a mock)"),
@@ -220,6 +238,7 @@ def pull_daily(season: int = 2026) -> None:
         p.pull_sleeper_players()
         p.pull_sleeper_projections(season)
         p.pull_espn_kona(season)
+        p.pull_espn_pro_teams(season)  # byes (LS-57); dedups when unchanged
         p.pull_crosswalk()
 
 
@@ -265,6 +284,20 @@ def load_players_cmd() -> None:
             raise typer.BadParameter("no valid players snapshot; run `lazy pull players` first")
         n = load_players(s, ctx.store.read(snap.storage_path), snap.id)
     typer.echo(f"loaded {n} players from snapshot {snap.id}")
+
+
+@load_app.command("byes")
+def load_byes_cmd(season: int = typer.Option(2026)) -> None:
+    """Load `core.team_byes` from the latest pro-team snapshot (LS-57)."""
+    from lazy_sleeper.ingest.byes import load_byes
+
+    ctx = _Ctx()
+    with session_scope(ctx.sessions) as s:
+        snap = SnapshotRepository(s).latest(SnapshotKey("espn", "pro_teams", season))
+        if snap is None:
+            raise typer.BadParameter("no valid pro-team snapshot; run `lazy pull byes` first")
+        n = load_byes(s, ctx.store.read(snap.storage_path), season, snap.id)
+    typer.echo(f"loaded {n} team byes for {season} from snapshot {snap.id}")
 
 
 @load_app.command("crosswalk")

@@ -18,6 +18,11 @@
   on_the_clock_team_name` (from `draft_order` + league users), and `recent_picks` (last 8
   league-wide, most recent first). The fallback page shows the countdown, the team and the feed
   (LS-56).
+- **Board and draft rows carry the player's bye week** — `bye` on `GET /board` rows,
+  `DraftRowOut`, the CSV and both HTML pages; sourced from ESPN's pro-team doc into
+  `core.team_byes` (`lazy pull byes --season 2026 --load`, also part of `lazy pull daily` and
+  the daily workflow's load step; migration 0014). Null for free agents / unloaded seasons
+  (LS-57).
 
 ## v0.1.1 — draft-2026 fixes (2026-08-28)
 

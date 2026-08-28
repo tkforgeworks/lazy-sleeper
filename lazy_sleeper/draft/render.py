@@ -134,7 +134,7 @@ function drawRows(st){
   const cls=[x.cliff?'cliff':'',`t-${x.tier&&x.tier%2?'odd':'even'}`].filter(Boolean).join(' ');
   const inj=x.injury_status?`<span class="inj">${esc(x.injury_status)}</span>`:'';
   return `<tr class="${cls}"><td>${x.rank}</td><td class="l">${esc(x.name)}${inj}</td><td>${x.position}</td>`+
-   `<td class="m">${esc(x.team||'')}</td><td><b>${num(x.pick_score)}</b></td><td>${num(x.vorp)}</td>`+
+   `<td class="m">${esc(x.team||'')}</td><td class="m">${x.bye??'-'}</td><td><b>${num(x.pick_score)}</b></td><td>${num(x.vorp)}</td>`+
    `<td><span class="surv ${sc}">${s==null?'n/a':Math.round(s*100)+'%'}</span></td>`+
    `<td class="m">${num(x.adp)}</td><td>${x.tier??'-'}</td><td class="m">${num(x.gap_to_next)}</td>`+
    `<td class="m">${num(x.points)}</td><td class="l">${tags.join('')}</td></tr>`;}).join('');
@@ -206,6 +206,7 @@ def draft_page(
         '<div class="banner" id="banner"></div>'
         '<div class="wrap">'
         '<table><thead><tr><th>#</th><th class="l">player</th><th>pos</th><th class="m">team</th>'
+        '<th class="m">bye</th>'
         '<th>score</th><th>vorp</th><th>surv</th><th class="m">adp</th><th>tier</th>'
         '<th class="m">gap</th><th class="m">pts</th><th class="l">flags</th></tr></thead>'
         '<tbody id="rows"></tbody></table></div>'

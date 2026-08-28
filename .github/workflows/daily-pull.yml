@@ -55,7 +55,7 @@ jobs:
       - name: Pull daily (players, season projections/ADP, ESPN, crosswalk)
         run: uv run lazy pull daily --season "${{ inputs.season || '2026' }}"
       - name: Load into core.*
-        run: uv run lazy load players && uv run lazy load crosswalk && uv run lazy load stats
+        run: uv run lazy load players && uv run lazy load crosswalk && uv run lazy load stats && uv run lazy load byes --season "${{ inputs.season || '2026' }}"
       - name: Freshness audit
         run: uv run lazy check freshness
       - name: Regenerate the draft board (derived.boards + CSV/HTML)

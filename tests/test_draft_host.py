@@ -608,3 +608,23 @@ def test_fallback_page_ticks_the_countdown_and_shows_the_feed(fx: ReplayFixture)
     assert 'id="feed"' in html and 'id="cd"' in html
     assert "pick_deadline" in html and "on_the_clock_team_name" in html and "recent_picks" in html
     assert "setInterval(drawCountdown,1000)" in html
+
+
+# --- LS-57: bye week on draft rows ---------------------------------------------------------
+
+
+def test_bye_flows_from_board_context_to_draft_rows_and_the_api(fx: ReplayFixture) -> None:
+    from dataclasses import replace
+
+    board = replace(_board(fx), byes={"X": 9})  # every test row is on team "X"
+    eng = DraftEngine(board, RULES, draft_doc=_doc(fx), user_id=ME)
+    eng.on_pick(_ev(fx.picks[0], eng.state.spec))
+    rows = state_payload(eng, fx.draft_id, limit=3)["rows"]
+    assert [r["bye"] for r in rows] == [9, 9, 9] and "bye" in ROW_FIELDS
+    eng = DraftEngine(_board(fx), RULES, draft_doc=_doc(fx), user_id=ME)  # byes not loaded
+    eng.on_pick(_ev(fx.picks[0], eng.state.spec))
+    assert state_payload(eng, fx.draft_id, limit=1)["rows"][0]["bye"] is None
+    from lazy_sleeper.api.app import DraftRowOut
+
+    assert DraftRowOut.model_validate(rows[0]).bye == 9
+    assert "bye" in DraftRowOut.model_fields
