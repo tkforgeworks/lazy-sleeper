@@ -11,10 +11,33 @@ M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benc
 M3 consensus draft board ✅ (2026-08-20) → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
 Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
-## Status (updated 2026-08-23 — refresh this block whenever a story merges)
+## Status (updated 2026-08-28 — refresh this block whenever a story merges)
 
-- **Done:** LS-10–15, 17–37 (PRs #1–#30). 234 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
+- **Done:** LS-10–15, 17–37 (PRs #1–#30). 296 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
+- **0.1.1 bug pass (2026-08-27/28, from the five-agent review of 0.1.0; fix version 0.1.1):**
+  LS-62/64/65/66 = branch `draft-poll-resilience`, LS-63 (+LS-67 hardening) = `draft-page-hardening`.
+  **Poller architecture changed:** `DraftPoller` only fetches (`SleeperPickSource` = the two
+  Sleeper GETs on the *draft* `HttpClient` — `Settings.draft_http_timeout_s` 5 s, retries 0, no
+  courtesy delay) and diffs `(pick_no, sleeper_id)` against its own last payload; a `Persister`
+  daemon thread applies `DbPickSink.sync/store_draft` (snapshot + `load_draft_picks`/`load_draft`
+  in one session; `puller_factory` injected) from a bounded deque with 1-2-4…15 s retry, dropping
+  the oldest past 50 and abandoning its backlog on `close` (so a restart never writes stale over
+  fresh). The only DB read on the poll path is `sink.known()` at run start (`degraded=True` and
+  everything re-emitted if it fails). `PollResult` carries `rows` (parsed picks) + `removed_picks`;
+  `DraftRunner` rebuilds from `r.rows` on poll 1 / undo (`reload_rows` is gone from runner, host
+  and CLI), guards `on_poll`, retries a raised rebuild via `rebuild_pending`, and records its own
+  death in `runner.error` (= `Running.error`). `DEFAULT_MAX_BACKOFF_S` 15; interval wait is
+  compensated for the poll's duration (`clock=` injectable). `/state.poller` gained `last_poll_at`,
+  `last_ok_at`, `failures_in_a_row`, `last_error`, `degraded`, `runner_error`, `rebuild_pending`,
+  `persist{pending,applied,failures,failures_in_a_row,dropped,last_error}` (`PollerOut`/`PersistOut`;
+  docs/api regenerated). **Page rules (LS-63):** clock/status/banner redraw every tick, table gated
+  on `seq > lastSeq`, gate reset on 404 / start / `poller.started_at` change, one fetch in flight,
+  staleness from the client clock; layout = flex column, table in `.wrap{overflow:auto}` with
+  sticky `thead`, 36 px buttons, `visibilitychange` tick. Verified with a Node DOM-shim harness
+  over a real `/state` (12 scenarios) — **the Chrome extension was offline again; LS-67's on-phone
+  checklist is still Tim's to run.** Git commits need the 1Password SSH agent (signing) — it was
+  not running during this pass, so the work was snapshotted per ticket and committed afterwards.
 - **Next up:** LS-52 snapshot dedup → LS-53 projections latest-wins (Supabase growth), then release
   process / run-without-uv. **LS-38 Tailscale skipped for the draft (Tim drafts from home; may move
   to in-season 0.2.0). LS-39 Flutter optional — API + fallback page are the first-class surface,
@@ -128,7 +151,7 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   `poll_once()` = snapshot picks → `sink.sync` (= `load_draft_picks`) → diff pick_nos against what the
   table held → one `PickEvent` per new pick (pick_no order; carries slot/round/sleeper_id/`metadata`
   name; `picked_by None` = autopick). `run(on_pick, stop=, max_polls=, until_complete=)` loops at
-  `interval_s` **2** (was 5 — the 8/23 mock measured 5.6 s/poll + 5 s page refresh = too slow on the clock), backoff `interval×2^failures` capped `max_backoff_s` 60 (+≤25 % jitter), resets on
+  `interval_s` **2** (was 5 — the 8/23 mock measured 5.6 s/poll + 5 s page refresh = too slow on the clock), backoff `interval×2^failures` capped `max_backoff_s` **15** since 0.1.1 (was 60; +≤25 % jitter), resets on
   success, never dies; stops on draft `status == complete` or `picks ≥ rounds×teams` (+ a final
   draft-doc refresh so `core.drafts` ends `complete`). Draft doc re-read **every poll until it has
   `draft_order` and status `drafting`** (Sleeper filled `draft_order` in mid-draft on the 8/21 mock),
