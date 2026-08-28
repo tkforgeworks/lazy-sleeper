@@ -262,3 +262,22 @@ def test_replay_mock_draft_fills_every_roster(spec: DraftSpec) -> None:
     mine = st.my_roster()
     assert mine is not None and [p.pick_no for p in mine.picks] == spec.picks_for_slot(8)
     assert mine.open_starters == {"DEF": 1} and set(mine.needs()) == {"DEF"}  # no DEF drafted
+
+
+def test_redelivered_pick_no_with_a_different_player_replaces_not_double_seats(
+    spec: DraftSpec,
+) -> None:
+    """Undo + repick inside one poll window (LS-66): pick 57 arrives again with player B. The
+    team must hold B in A's seat, never both — also when 57 is that team's *latest* pick."""
+    st = DraftState(spec, my_slot=1)
+    p = spec.picks_for_slot(5)
+    st.apply(_ev(p[0], "RB", spec, sleeper_id="A"))
+    st.apply(_ev(p[0], "WR", spec, sleeper_id="B"))  # same pick_no, different player + position
+    seated = st.roster(5).picks
+    assert [s.sleeper_id for s in seated] == ["B"] and [s.seat for s in seated] == ["WR"]
+    assert st.taken() == {"B"} and st.picks_made == 1
+    # and when the re-delivered pick is not the latest one either
+    st.apply(_ev(p[1], "TE", spec, sleeper_id="C"))
+    st.apply(_ev(p[0], "QB", spec, sleeper_id="D"))
+    assert [s.sleeper_id for s in st.roster(5).picks] == ["D", "C"]
+    assert st.taken() == {"C", "D"} and st.picks_made == 2

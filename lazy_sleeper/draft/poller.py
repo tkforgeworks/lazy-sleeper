@@ -33,7 +33,7 @@ import logging
 import random
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -98,9 +98,17 @@ class Pulled:
     pulled_at: datetime
 
 
+PickKey = tuple[int, str | None]  # (pick_no, sleeper_id) — a pick_no re-picked with a different
+# player after an undo is a *new* pick (LS-66), so the diff is keyed on the pair
+
+
+def pick_keys(rows: Iterable[Mapping[str, Any]]) -> frozenset[PickKey]:
+    return frozenset((r["pick_no"], r.get("sleeper_id")) for r in rows)
+
+
 @dataclass(frozen=True)
 class SyncResult:
-    before: frozenset[int]  # pick_nos the sink held before this sync
+    before: frozenset[PickKey]  # (pick_no, sleeper_id) the sink held before this sync
     rows: tuple[dict[str, Any], ...]  # parsed rows now in the sink, pick_no order
     removed: int
 
@@ -172,9 +180,12 @@ class DbPickSink:
         rows = parse_picks(pulled.payload, self._draft_id)
         with session_scope(self._sessions) as s:
             before = frozenset(
-                s.execute(
-                    select(DraftPick.pick_no).where(DraftPick.draft_id == self._draft_id)
-                ).scalars()
+                (int(pn), sid)
+                for pn, sid in s.execute(
+                    select(DraftPick.pick_no, DraftPick.sleeper_id).where(
+                        DraftPick.draft_id == self._draft_id
+                    )
+                )
             )
             _, removed = load_draft_picks(
                 s, pulled.payload, self._draft_id, pulled.snapshot_id, pulled.pulled_at
@@ -202,9 +213,9 @@ class MemorySink:
 
     def sync(self, pulled: Pulled) -> SyncResult:
         rows = parse_picks(pulled.payload, self._draft_id)
-        before = frozenset(self.rows)
+        before = pick_keys(self.rows.values())
         now = {r["pick_no"] for r in rows}
-        removed = len(before - now)
+        removed = len({pn for pn, _ in before} - now)
         self.rows = {r["pick_no"]: r for r in rows}
         return SyncResult(before, tuple(rows), removed)
 
@@ -346,7 +357,7 @@ class DraftPoller:
                 metadata=r.get("metadata_"),
             )
             for r in res.rows
-            if r["pick_no"] not in res.before
+            if (r["pick_no"], r.get("sleeper_id")) not in res.before
         )
         self._seq, self._last_sha, self._last_count = seq, sha, total
         return self._result(seq, pulled.snapshot_id, total, res.removed, new, unchanged=False)
@@ -472,6 +483,7 @@ __all__ = [
     "MemorySink",
     "OnPick",
     "PickEvent",
+    "PickKey",
     "PickSink",
     "PickSource",
     "PollResult",
@@ -481,4 +493,5 @@ __all__ = [
     "RunSummary",
     "SleeperPickSource",
     "SyncResult",
+    "pick_keys",
 ]

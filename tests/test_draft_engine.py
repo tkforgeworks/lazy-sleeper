@@ -216,3 +216,26 @@ def test_runner_rebuilds_from_reload_rows_on_first_poll_and_undo(fx: ReplayFixtu
     runner = DraftRunner(poller, eng, reload_rows=reload)
     runner.run()
     assert calls and eng.state.picks_made == 180
+
+
+def test_undo_and_repick_inside_one_poll_window_converges(fx: ReplayFixture) -> None:
+    """LS-66: poll n shows pick 57 = A; poll n+1 shows pick 57 = B (the commissioner undid A and
+    the team re-picked B before the next poll). A must return to the pool, B must leave it, and
+    the team's roster must hold exactly one player in that seat."""
+    from tests.test_draft_poller import _Payloads, _swap
+
+    a = fx.picks[56]["player_id"]
+    payloads = [fx.picks[:57], _swap(fx, 57, "u0", "WR"), fx.picks[:56] + _swap(fx, 57, "u0", "WR")[56:] + fx.picks[57:60]]  # fmt: skip
+    sink = MemorySink(fx.draft_id)
+    poller = DraftPoller(_Payloads(fx, payloads), sink, fx.draft_id, sleep=lambda _s: None)
+    eng = DraftEngine(_board(fx, extra=5), RULES, draft_doc=_doc(fx), user_id=ME)
+    runner = DraftRunner(poller, eng, until_complete=False, max_polls=3)
+    runner.run()
+    st = eng.state
+    taken = st.taken()
+    assert "u0" in taken and a not in taken and st.picks_made == 60
+    slot = fx.picks[56]["draft_slot"]
+    seated = [s.sleeper_id for s in st.roster(slot).picks]
+    assert seated.count("u0") == 1 and a not in seated
+    assert a in {r.value.sleeper_id for r in eng.latest.rows}  # A is advisable again
+    assert "u0" not in {r.value.sleeper_id for r in eng.latest.rows}

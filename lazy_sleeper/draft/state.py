@@ -223,7 +223,8 @@ class DraftState:
 
     # -- feeding -------------------------------------------------------------------
     def apply(self, ev: PickEvent) -> None:
-        """Seat one pick. Idempotent on pick_no; an out-of-order arrival re-seats that team."""
+        """Seat one pick. Idempotent on (pick_no, player); a re-delivered pick_no with a different
+        player replaces the old one; an out-of-order arrival re-seats that team."""
         pos = (ev.metadata or {}).get("position") if ev.metadata else None
         self.add(ev.pick_no, ev.sleeper_id, pos, slot=ev.draft_slot)
 
@@ -237,7 +238,9 @@ class DraftState:
             return
         self._picks[pick_no] = (slot, sleeper_id, position)
         roster = self._rosters[slot]
-        if roster.picks and roster.picks[-1].pick_no > pick_no:
+        if roster.picks and roster.picks[-1].pick_no >= pick_no:
+            # out-of-order arrival, or the same pick_no re-delivered with a different player
+            # (undo + repick inside one poll window, LS-66): rebuild the team's seats
             self._reseat(slot)
         else:
             roster.add(pick_no, sleeper_id, position)

@@ -282,3 +282,43 @@ def test_completion_triggers_a_final_draft_refresh(fx: ReplayFixture) -> None:
     summary = p.run()
     # poll 1 + the final refresh, retried twice while the doc still says "drafting"
     assert summary.complete and src.draft_reads == 4
+
+
+# --- undo + repick inside one poll window (LS-66) ------------------------------
+
+
+def _swap(fx: ReplayFixture, pick_no: int, sleeper_id: str, position: str) -> list[dict]:
+    """The fixture's first ``pick_no`` picks with the last one re-picked as another player."""
+    picks = [dict(p) for p in fx.picks[:pick_no]]
+    meta = dict(picks[-1]["metadata"])
+    meta.update(position=position, player_id=sleeper_id, first_name="Re", last_name="Pick")
+    picks[-1].update(player_id=sleeper_id, metadata=meta)
+    return picks
+
+
+class _Payloads:
+    """A source over explicit pick lists (not prefixes of the fixture)."""
+
+    def __init__(self, fx: ReplayFixture, payloads: list[list[dict]]) -> None:
+        self._fx, self._payloads, self._i = fx, payloads, 0
+
+    def picks(self) -> Pulled:
+        if self._i >= len(self._payloads):
+            raise StopIteration("replay exhausted")
+        p = self._payloads[self._i]
+        self._i += 1
+        return Pulled(json.dumps(p).encode(), None, datetime.now(UTC))
+
+    def draft(self) -> bytes | None:
+        return self._fx.draft_payload(status="drafting")
+
+
+def test_changed_player_at_an_existing_pick_no_is_a_new_event(fx: ReplayFixture) -> None:
+    before = fx.picks[:57]
+    after = _swap(fx, 57, "999999", "TE")
+    p, sink, _ = _poller(fx, _Payloads(fx, [before, after]))
+    r1, r2 = p.poll_once(), p.poll_once()
+    assert len(r1.new) == 57
+    assert r2.removed == 0 and [(e.pick_no, e.sleeper_id) for e in r2.new] == [(57, "999999")]
+    assert r2.new[0].metadata["position"] == "TE"
+    assert sink.rows[57]["sleeper_id"] == "999999" and len(sink.rows) == 57
