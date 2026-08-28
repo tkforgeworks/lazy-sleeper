@@ -87,6 +87,21 @@ def validate_espn_kona(payload: bytes, *, min_records: int = 500) -> ValidationR
     return ValidationResult(True, n)
 
 
+def validate_espn_pro_teams(payload: bytes, *, min_teams: int = 32) -> ValidationResult:
+    """ESPN season doc with ``settings.proTeams[]`` (the bye-week source, LS-57)."""
+    try:
+        data = parse_json(payload)
+    except ValueError as e:
+        return _fail(f"invalid JSON: {e}")
+    teams = data.get("settings", {}).get("proTeams") if isinstance(data, dict) else None
+    if not isinstance(teams, list):
+        return _fail("missing settings.proTeams")
+    with_bye = [t for t in teams if isinstance(t, dict) and t.get("byeWeek")]
+    if len(with_bye) < min_teams:
+        return _fail(f"only {len(with_bye)} teams carry a byeWeek (< {min_teams})", len(teams))
+    return ValidationResult(True, len(teams), "ok")
+
+
 def validate_json_any(payload: bytes) -> ValidationResult:
     """For documented Sleeper endpoints (league, rosters, draft picks): just parseable JSON."""
     try:

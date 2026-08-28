@@ -24,3 +24,7 @@ class EspnClient:
         }
         headers = {"X-Fantasy-Filter": json.dumps(fantasy_filter, separators=(",", ":"))}
         return self._http.get_bytes(url, params={"view": "kona_player_info"}, headers=headers)
+
+    def pro_teams(self, season: int) -> bytes:
+        """The season doc with ``settings.proTeams[]`` — bye weeks per team (LS-57)."""
+        return self._http.get_bytes(f"{BASE}/{season}", params={"view": "proTeamSchedules_wl"})

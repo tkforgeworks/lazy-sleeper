@@ -30,6 +30,7 @@ from lazy_sleeper.db.models import Player
 from lazy_sleeper.draft.poller import DraftPoller, PickEvent, PollResult, RunSummary
 from lazy_sleeper.draft.signals import SearchRankAdp, advise
 from lazy_sleeper.draft.state import DraftSpec, DraftState, resolve_my_slot
+from lazy_sleeper.ingest.byes import byes_for
 from lazy_sleeper.providers.base import ProjectionProvider
 from lazy_sleeper.scoring.league import ScoringRules
 
@@ -50,6 +51,7 @@ class BoardContext:
     injuries: Mapping[str, str] = field(default_factory=dict)  # sleeper_id → injury_status
     season: int | None = None
     built_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    byes: Mapping[str, int] = field(default_factory=dict)  # team → bye week (LS-57)
 
     @classmethod
     def from_rows(
@@ -63,6 +65,7 @@ class BoardContext:
         names: Mapping[str, str] | None = None,
         injuries: Mapping[str, str] | None = None,
         season: int | None = None,
+        byes: Mapping[str, int] | None = None,
     ) -> BoardContext:
         rows = tuple(rows)
         search_rank = dict(search_rank or {})
@@ -75,7 +78,7 @@ class BoardContext:
             positions.setdefault(r.value.sleeper_id, r.value.position)
         return cls(
             rows, dict(adp), cfg, search_rank, rank_map, positions, dict(names or {}),
-            dict(injuries or {}), season,
+            dict(injuries or {}), season, byes=dict(byes or {}),
         )  # fmt: skip
 
 
@@ -108,6 +111,7 @@ def load_board_context(
         names={p[0]: f"{p[1]} {p[2]}/{p[3]}" for p in players},
         injuries={p[0]: p[5] for p in players if p[5]},
         season=season,
+        byes=byes_for(session, season),
     )
 
 

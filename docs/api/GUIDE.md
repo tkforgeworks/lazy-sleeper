@@ -137,6 +137,10 @@ The reference marks these as "object" because the app returns plain dicts. Their
 | `spread` | number \| null | Point spread between ensemble members |
 | `components` | object \| null | Per-provider points, e.g. `{"sleeper": 210.5, "espn": 224.1}` |
 
+Both row shapes carry **`bye`** (integer \| null): the player's team bye week for the board's
+season (from `core.team_byes`, loaded by `lazy pull byes --load`); null for free agents, for
+teams without a schedule row, and on boards generated before the byes were loaded.
+
 ### `GET /ensemble/weights` (also returned by the PUT/DELETE ensemble endpoints)
 
 ```
@@ -183,6 +187,8 @@ The reference marks these as "object" because the app returns plain dicts. Their
   player ranks below a now-or-never one of equal VORP.
 - **`injury_status`** — Sleeper's status string (e.g. `Questionable`, `Out`); fresh as of the
   last `lazy pull players --load`.
+- **`bye`** — the team's bye week (1–18) for the season; null when unknown (no team, or byes
+  not loaded yet). Render as the BYE column; no client-side join needed.
 - **`seat`** (roster picks) — the position code the pick fills (`QB`, `RB`, …), `"FLEX"`, or
   `"BN"` (bench). Seats fill greedily in pick order: dedicated → eligible flex → bench.
 - **`needs`** (roster) — per-position urgency score: open starter 1.0 + flex share 0.5 +

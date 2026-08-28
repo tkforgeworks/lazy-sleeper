@@ -1,0 +1,238 @@
+{
+ "seasonId": null,
+ "settings": {
+  "proTeams": [
+   {
+    "id": 11,
+    "abbrev": "IND",
+    "name": "Colts",
+    "location": "Indianapolis",
+    "byeWeek": 13
+   },
+   {
+    "id": 12,
+    "abbrev": "KC",
+    "name": "Chiefs",
+    "location": "Kansas City",
+    "byeWeek": 5
+   },
+   {
+    "id": 13,
+    "abbrev": "LV",
+    "name": "Raiders",
+    "location": "Las Vegas",
+    "byeWeek": 13
+   },
+   {
+    "id": 14,
+    "abbrev": "LAR",
+    "name": "Rams",
+    "location": "Los Angeles",
+    "byeWeek": 11
+   },
+   {
+    "id": 15,
+    "abbrev": "MIA",
+    "name": "Dolphins",
+    "location": "Miami",
+    "byeWeek": 6
+   },
+   {
+    "id": 16,
+    "abbrev": "MIN",
+    "name": "Vikings",
+    "location": "Minnesota",
+    "byeWeek": 6
+   },
+   {
+    "id": 17,
+    "abbrev": "NE",
+    "name": "Patriots",
+    "location": "New England",
+    "byeWeek": 11
+   },
+   {
+    "id": 18,
+    "abbrev": "NO",
+    "name": "Saints",
+    "location": "New Orleans",
+    "byeWeek": 8
+   },
+   {
+    "id": 19,
+    "abbrev": "NYG",
+    "name": "Giants",
+    "location": "New York",
+    "byeWeek": 8
+   },
+   {
+    "id": 20,
+    "abbrev": "NYJ",
+    "name": "Jets",
+    "location": "New York",
+    "byeWeek": 13
+   },
+   {
+    "id": 21,
+    "abbrev": "PHI",
+    "name": "Eagles",
+    "location": "Philadelphia",
+    "byeWeek": 10
+   },
+   {
+    "id": 22,
+    "abbrev": "ARI",
+    "name": "Cardinals",
+    "location": "Arizona",
+    "byeWeek": 14
+   },
+   {
+    "id": 23,
+    "abbrev": "PIT",
+    "name": "Steelers",
+    "location": "Pittsburgh",
+    "byeWeek": 9
+   },
+   {
+    "id": 24,
+    "abbrev": "LAC",
+    "name": "Chargers",
+    "location": "Los Angeles",
+    "byeWeek": 7
+   },
+   {
+    "id": 25,
+    "abbrev": "SF",
+    "name": "49ers",
+    "location": "San Francisco",
+    "byeWeek": 8
+   },
+   {
+    "id": 26,
+    "abbrev": "SEA",
+    "name": "Seahawks",
+    "location": "Seattle",
+    "byeWeek": 11
+   },
+   {
+    "id": 27,
+    "abbrev": "TB",
+    "name": "Buccaneers",
+    "location": "Tampa Bay",
+    "byeWeek": 10
+   },
+   {
+    "id": 28,
+    "abbrev": "WSH",
+    "name": "Commanders",
+    "location": "Washington",
+    "byeWeek": 7
+   },
+   {
+    "id": 29,
+    "abbrev": "CAR",
+    "name": "Panthers",
+    "location": "Carolina",
+    "byeWeek": 5
+   },
+   {
+    "id": 30,
+    "abbrev": "JAX",
+    "name": "Jaguars",
+    "location": "Jacksonville",
+    "byeWeek": 7
+   },
+   {
+    "id": 33,
+    "abbrev": "BAL",
+    "name": "Ravens",
+    "location": "Baltimore",
+    "byeWeek": 13
+   },
+   {
+    "id": 34,
+    "abbrev": "HOU",
+    "name": "Texans",
+    "location": "Houston",
+    "byeWeek": 8
+   },
+   {
+    "id": 0,
+    "abbrev": "FA",
+    "name": "FA",
+    "location": "",
+    "byeWeek": 0
+   },
+   {
+    "id": 1,
+    "abbrev": "ATL",
+    "name": "Falcons",
+    "location": "Atlanta",
+    "byeWeek": 11
+   },
+   {
+    "id": 2,
+    "abbrev": "BUF",
+    "name": "Bills",
+    "location": "Buffalo",
+    "byeWeek": 7
+   },
+   {
+    "id": 3,
+    "abbrev": "CHI",
+    "name": "Bears",
+    "location": "Chicago",
+    "byeWeek": 10
+   },
+   {
+    "id": 4,
+    "abbrev": "CIN",
+    "name": "Bengals",
+    "location": "Cincinnati",
+    "byeWeek": 6
+   },
+   {
+    "id": 5,
+    "abbrev": "CLE",
+    "name": "Browns",
+    "location": "Cleveland",
+    "byeWeek": 11
+   },
+   {
+    "id": 6,
+    "abbrev": "DAL",
+    "name": "Cowboys",
+    "location": "Dallas",
+    "byeWeek": 14
+   },
+   {
+    "id": 7,
+    "abbrev": "DEN",
+    "name": "Broncos",
+    "location": "Denver",
+    "byeWeek": 10
+   },
+   {
+    "id": 8,
+    "abbrev": "DET",
+    "name": "Lions",
+    "location": "Detroit",
+    "byeWeek": 6
+   },
+   {
+    "id": 9,
+    "abbrev": "GB",
+    "name": "Packers",
+    "location": "Green Bay",
+    "byeWeek": 11
+   },
+   {
+    "id": 10,
+    "abbrev": "TEN",
+    "name": "Titans",
+    "location": "Tennessee",
+    "byeWeek": 9
+   }
+  ]
+ }
+}

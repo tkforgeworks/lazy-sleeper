@@ -398,12 +398,28 @@ class BoardEntry(Base):
     tier: Mapped[int | None] = mapped_column(Integer)
     cliff: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     gap_to_next: Mapped[float | None] = mapped_column(Float)
+    bye: Mapped[int | None] = mapped_column(Integer)  # LS-57: the team's bye week
     adp: Mapped[float | None] = mapped_column(Float)
     adp_delta: Mapped[float | None] = mapped_column(Float)
     adp_flag: Mapped[str | None] = mapped_column(String(8))
     spread: Mapped[float | None] = mapped_column(Float)
     disagree: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     components: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class TeamBye(Base):
+    """One team's bye week for a season (LS-57), from ESPN's pro-team doc. Upserted."""
+
+    __tablename__ = "team_byes"
+    __table_args__ = {"schema": "core"}
+
+    season: Mapped[int] = mapped_column(Integer, primary_key=True)
+    team: Mapped[str] = mapped_column(String(8), primary_key=True)  # Sleeper abbreviation
+    bye_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    espn_id: Mapped[int | None] = mapped_column(Integer)
+    espn_abbrev: Mapped[str | None] = mapped_column(String(8))
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("raw.snapshots.id"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Draft(Base):

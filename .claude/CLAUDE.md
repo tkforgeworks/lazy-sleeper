@@ -15,6 +15,24 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
 - **Done:** LS-10–15, 17–37 (PRs #1–#30). 296 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
+- **0.1.2 (be/0.1.2, 2026-08-28, PRs #42–#45):** **LS-69** DB pool hardening — `make_engine`
+  sets `pool_recycle` 300 s, libpq keepalives + `connect_timeout` 10 s (`DB_*` settings) and
+  `SET statement_timeout` (30 s) per new connection via a `connect` event (committed; Supavisor
+  drops the `options` startup param — verified live); `OperationalError` → **503** `database
+  unavailable: …`; `DraftHost.start` builds the engine under a per-draft lock. **LS-70**
+  `SleeperPickSource` maps a 404 to `DraftNotFound`; the poll loop retries it once then ends with
+  `RunSummary.fatal` → `runner.error`/`poller.runner_error`; `create_app` lifespan shutdown calls
+  `host.stop_all(5 s)`, `lazy serve` sets `timeout_graceful_shutdown=4`. **LS-56** `clock.
+  pick_timer_s`/`pick_deadline`/`on_the_clock_team_name` + top-level `recent_picks` (8, typed
+  `RecentPickOut`); engine `pick_started_at` moves only with `current_pick` (event
+  `first_seen_at`; doc `last_picked` if within `DOC_SLACK_S` 4 s; `start_time` for pick 1; DB
+  `first_seen_at` on restart; `rebuild(rows, at=)`); `DraftEngine(team_names=)` from
+  `DbDraftFactory.team_names` (`core.league_users`, configured league for mocks); page shows a
+  1 s countdown + team + feed. GUIDE Workflow 1 documents the seq-redraw exemption. **LS-57**
+  `bye` on board rows / `DraftRowOut` / CSV / both HTML pages from `core.team_byes` (migration
+  0014; `ingest/byes.py`; ESPN `?view=proTeamSchedules_wl` via `EspnClient.pro_teams`,
+  `espn_stats.TEAMS` id map; `lazy pull byes --season --load`, `lazy load byes`, in `pull daily`
+  and the workflow's load step). **LS-42** (ForgeModel knobs) moved to be/0.2.0 with LS-40/41/43.
 - **0.1.1 bug pass (2026-08-27/28, from the five-agent review of 0.1.0; fix version 0.1.1):**
   LS-62/64/65/66 = branch `draft-poll-resilience`, LS-63 (+LS-67 hardening) = `draft-page-hardening`.
   **Poller architecture changed:** `DraftPoller` only fetches (`SleeperPickSource` = the two

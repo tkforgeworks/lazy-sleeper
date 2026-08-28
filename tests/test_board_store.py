@@ -94,3 +94,35 @@ def test_html_is_self_contained_and_escapes() -> None:
     assert 'data-pos="RB"' in html and 'data-pos="WR"' in html
     assert "Questionable" in html and ">value<" in html and ">DISAGREE<" in html
     assert "http://" not in html and "https://" not in html  # no external assets
+
+
+# --- LS-57: bye week on the persisted row, the CSV and the HTML ------------------------------
+
+
+def _board_rows():
+    projections = [
+        PlayerProjection(sleeper_id="a", position="RB", team="DET", points=300.0, source="t"),
+        PlayerProjection(sleeper_id="b", position="WR", team="LAR", points=250.0, source="t"),
+        PlayerProjection(sleeper_id="c", position="RB", team=None, points=100.0, source="t"),
+    ]
+    return assign_tiers(vorp_board(projections, {"RB": 100.0, "WR": 100.0}), TierConfig())
+
+
+def test_flatten_attaches_the_bye_and_leaves_it_null_without_a_team_or_schedule() -> None:
+    byes = {"DET": 6, "LAR": 11}
+    rows = flatten(_board_rows(), {"a": ("Jahmyr Gibbs", None)}, byes)
+    by_id = {r["sleeper_id"]: r for r in rows}
+    assert by_id["a"]["bye"] == 6 and by_id["b"]["bye"] == 11
+    assert by_id["c"]["bye"] is None  # no team
+    assert all(r["bye"] is None for r in flatten(_board_rows(), {}))  # byes not loaded
+    assert all(r["bye"] is None for r in flatten(_board_rows(), {}, {"KC": 5}))  # other teams
+    assert "bye" in ROW_FIELDS and "bye" in {c.name for c in BoardEntry.__table__.columns}
+
+
+def test_csv_and_html_carry_the_bye_column() -> None:
+    rows = flatten(_board_rows(), {}, {"DET": 6})
+    reader = csv.DictReader(io.StringIO(to_csv(rows)))
+    assert "bye" in reader.fieldnames
+    assert [r["bye"] for r in reader] == ["6", "", ""]
+    html = to_html({"season": 2026, "provider": "t", "baseline": "live"}, rows)
+    assert "<th>bye</th>" in html and "<td>6</td>" in html

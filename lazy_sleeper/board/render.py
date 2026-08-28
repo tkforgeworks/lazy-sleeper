@@ -18,6 +18,7 @@ CSV_COLUMNS = (
     "position",
     "team",
     "injury_status",
+    "bye",
     "points",
     "baseline",
     "vorp",
@@ -87,7 +88,8 @@ def to_html(meta: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> str:
         + "</div>"
     )
     cols = (
-        '<tr><th>#</th><th class="l">player</th><th>pos</th><th>team</th><th>pts</th><th>vorp</th>'
+        '<tr><th>#</th><th class="l">player</th><th>pos</th><th>team</th><th>bye</th><th>pts</th>'
+        "<th>vorp</th>"
         "<th>pos#</th><th>tier</th><th>gap</th><th>adp</th><th>Δadp</th><th>spread</th>"
         '<th class="l">flags</th></tr>'
     )
@@ -126,6 +128,7 @@ def _row_html(r: Mapping[str, Any]) -> str:
         f'<tr class="{" ".join(c for c in classes if c)}" data-pos="{escape(r["position"])}">'
         f'<td>{r["rank"]}</td><td class="l">{escape(str(r["name"]))}{injury}</td>'
         f"<td>{escape(r['position'])}</td><td>{escape(str(r.get('team') or ''))}</td>"
+        f"<td>{'-' if r.get('bye') is None else r['bye']}</td>"
         f"<td>{_num(r['points'])}</td><td>{_num(r['vorp'])}</td><td>{r['pos_rank']}</td>"
         f"<td>{'-' if tier is None else tier}</td><td>{_num(r.get('gap_to_next'))}</td>"
         f"<td>{_num(r.get('adp'))}</td><td>{_num(r.get('adp_delta'), '+.0f')}</td>"

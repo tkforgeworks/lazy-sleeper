@@ -130,6 +130,7 @@ lazy db upgrade                                          # alembic upgrade head
 lazy pull daily                                          # players + 2026 proj/ADP + ESPN + crosswalk
 lazy load players && lazy load crosswalk                   # → core.players / core.crosswalk
 lazy load stats                                          # → core.projections/actuals/adp/snap_counts/expected_points
+lazy pull byes --season 2026 --load                      # bye weeks (ESPN pro-team doc) → core.team_byes; once a season
 lazy pull league --load                                  # league/users/rosters/draft/picks → core.drafts/draft_picks/rosters/league_users
 lazy pull picks --draft-id <mock draft id> --load        # draft-night poll target; point at a Sleeper mock to rehearse
 lazy serve                                               # run the API + draft companion; prints all the URLs
@@ -397,7 +398,8 @@ recompute sequence, so a stalled or dead poller is visible within a few seconds.
 - [ ] `lazy pull players --load` — **injury statuses are only as fresh as this pull**; the draft
       surface shows them next to names
 - [ ] `lazy check freshness` and `lazy check joins` clean
-- [ ] `lazy board regen` → eyeball `/board.html` (top ~30 look sane, no missing names)
+- [ ] `lazy board regen` → eyeball `/board.html` (top ~30 look sane, no missing names, bye
+      column filled — if it is all `-`, `lazy pull byes --season 2026 --load` and regen again)
 - [ ] Dials: `/board/config.html` shows what the last mock settled on
 
 **Phone + firewall (do once, days before — the first inbound connection is where it fails):**

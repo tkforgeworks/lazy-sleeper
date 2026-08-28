@@ -154,6 +154,15 @@ class Puller:
         payload = self._espn.kona(season)
         return self.snapshot(SnapshotKey("espn", "kona", season), payload, validate_espn_kona)
 
+    def pull_espn_pro_teams(self, season: int) -> Snapshot:
+        """Bye weeks (LS-57): the small season doc with ``settings.proTeams[]``."""
+        from lazy_sleeper.ingest.validate import validate_espn_pro_teams
+
+        payload = self._espn.pro_teams(season)
+        return self.snapshot(
+            SnapshotKey("espn", "pro_teams", season), payload, validate_espn_pro_teams
+        )
+
     # --- nflverse ------------------------------------------------------------
     def pull_nflverse_stats(self, season: int) -> Snapshot:
         payload = self._nflverse.stats_player_week(season)

@@ -222,6 +222,7 @@ One available player, best pick first (``rank`` = overall pick_score order).
 | `position` | string | yes |  |
 | `team` | string | null | yes |  |
 | `injury_status` | string | null | yes |  |
+| `bye` | integer | null | yes |  |
 | `points` | number | yes |  |
 | `vorp` | number | yes |  |
 | `pos_rank` | integer | yes |  |
