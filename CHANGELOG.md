@@ -12,6 +12,12 @@
   `poller.runner_error` says why); transient errors keep the capped backoff. `lazy serve` stops
   every runner from the lifespan shutdown and caps in-flight requests at 4 s, so Ctrl-C finishes
   in seconds (LS-70).
+- **Draft state carries the pick clock, the on-the-clock team's name, and a recent-pick feed** —
+  `clock.pick_deadline` / `pick_timer_s` (derived server-side from Sleeper's timer and when the
+  current pick started; stable within a pick so a client ticks it locally), `clock.
+  on_the_clock_team_name` (from `draft_order` + league users), and `recent_picks` (last 8
+  league-wide, most recent first). The fallback page shows the countdown, the team and the feed
+  (LS-56).
 
 ## v0.1.1 — draft-2026 fixes (2026-08-28)
 

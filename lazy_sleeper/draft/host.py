@@ -120,6 +120,33 @@ def roster_dict(roster: TeamRoster | None, names: Mapping[str, str]) -> dict[str
     }
 
 
+RECENT_PICKS = 8
+
+
+def recent_picks(
+    st: DraftState,
+    names: Mapping[str, str],
+    slot_names: Mapping[int, str],
+    *,
+    limit: int = RECENT_PICKS,
+) -> list[dict[str, Any]]:
+    """The league-wide pick feed (LS-56): the last ``limit`` picks, most recent first."""
+    out = []
+    for n in sorted(st.picks, reverse=True)[:limit]:
+        slot, sid, pos = st.picks[n]
+        out.append(
+            {
+                "pick_no": n,
+                "slot": slot,
+                "team_name": slot_names.get(slot) if slot is not None else None,
+                "sleeper_id": sid,
+                "name": _name(names, sid),
+                "position": pos,
+            }
+        )
+    return out
+
+
 def state_payload(
     engine: DraftEngine,
     draft_id: str,
@@ -135,6 +162,7 @@ def state_payload(
     st: DraftState = engine.state
     spec = st.spec
     names = engine.board.names
+    otc = st.on_the_clock
     rows = [row_dict(i, r, names, engine.board.injuries) for i, r in enumerate(a.rows, start=1)]
     if position:
         pos = position.upper()
@@ -154,15 +182,19 @@ def state_payload(
         "clock": {
             "current_pick": st.current_pick,
             "round": spec.round_of(st.current_pick) if not st.complete else None,
-            "on_the_clock": st.on_the_clock,
+            "on_the_clock": otc,
+            "on_the_clock_team_name": engine.slot_names.get(otc) if otc is not None else None,
             "my_slot": st.my_slot,
-            "my_turn": a.my_turn and st.on_the_clock == st.my_slot,
+            "my_turn": a.my_turn and otc == st.my_slot,
             "my_next_pick": my_next,
             "picks_until_my_turn": st.picks_until_my_turn(),
             "picks_made": st.picks_made,
             "complete": st.complete,
+            "pick_timer_s": engine.pick_timer_s,
+            "pick_deadline": engine.pick_deadline,
         },
         "my_roster": roster_dict(st.my_roster(), names),
+        "recent_picks": recent_picks(st, names, engine.slot_names),
         "recompute": {
             "seq": a.seq,
             "pick_no": a.pick_no,
@@ -383,7 +415,27 @@ class DbDraftFactory:
                 "rounds": row.rounds,
                 "type": row.type,
                 "draft_order": row.draft_order,
+                "league_id": row.league_id,
+                "status": row.status,
+                "pick_timer": row.pick_timer,
+                "start_time": row.start_time,
+                "last_picked": row.last_picked,
             }
+
+    def team_names(self, league_id: str | None = None) -> dict[str, str]:
+        """Sleeper user_id → team name (display name when unset) from ``core.league_users``.
+        Mock drafts carry no ``league_id``; the configured league's members are the drafters."""
+        from lazy_sleeper.db.models import LeagueUser
+        from lazy_sleeper.db.session import session_scope
+
+        league = league_id or self._settings.sleeper_league_id
+        with session_scope(self._sessions) as s:
+            rows = s.execute(
+                select(LeagueUser.user_id, LeagueUser.display_name, LeagueUser.team_name).where(
+                    LeagueUser.league_id == league
+                )
+            ).all()
+        return {uid: (team or display) for uid, display, team in rows if team or display}
 
     def pick_rows(self, draft_id: str) -> list[dict[str, Any]]:
         from lazy_sleeper.db.models import DraftPick
@@ -396,10 +448,17 @@ class DbDraftFactory:
                     DraftPick.draft_slot,
                     DraftPick.sleeper_id,
                     DraftPick.metadata_,
+                    DraftPick.first_seen_at,
                 ).where(DraftPick.draft_id == draft_id)
             ).all()
         return [
-            {"pick_no": p[0], "draft_slot": p[1], "sleeper_id": p[2], "metadata_": p[3]}
+            {
+                "pick_no": p[0],
+                "draft_slot": p[1],
+                "sleeper_id": p[2],
+                "metadata_": p[3],
+                "first_seen_at": p[4],
+            }
             for p in picks
         ]
 
@@ -413,12 +472,14 @@ class DbDraftFactory:
             rules = load_league_rules(s, self._store)
             cfg = BoardConfigRepository(s).get()
             board = load_board_context(s, self._provider(s, self.provider_name), rules, cfg, season)
+        doc = self.draft_doc(draft_id)
         eng = DraftEngine(
             board,
             rules,
-            draft_doc=self.draft_doc(draft_id),
+            draft_doc=doc,
             my_slot=self._settings.my_draft_slot,
             user_id=self._settings.sleeper_user_id,
+            team_names=self.team_names((doc or {}).get("league_id")),
         )
         eng.rebuild(self.pick_rows(draft_id))
         return eng
@@ -439,10 +500,12 @@ class DbDraftFactory:
 
 
 __all__ = [
+    "RECENT_PICKS",
     "ROW_FIELDS",
     "DbDraftFactory",
     "DraftHost",
     "Running",
+    "recent_picks",
     "roster_dict",
     "row_dict",
     "state_payload",

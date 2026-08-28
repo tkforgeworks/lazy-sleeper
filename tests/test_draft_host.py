@@ -542,3 +542,69 @@ def test_app_shutdown_stops_live_runners(fx: ReplayFixture) -> None:
     assert time.monotonic() - t0 < 5
     assert run.runner.stop.is_set() and not run.runner.running
     assert run.runner.summary is not None and run.runner.summary.stopped
+
+
+# --- LS-56: pick clock, on-the-clock team, recent picks in the payload -----------------------
+
+
+def test_state_payload_has_clock_team_name_and_recent_picks(fx: ReplayFixture) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from lazy_sleeper.draft.poller import PickEvent
+
+    doc = {**_doc(fx), "pick_timer": 120, "draft_order": {ME: 8, "111": 7}}
+    names = {ME: "Lazy Sleepers", "111": "Rivals"}
+    eng = DraftEngine(_board(fx), RULES, draft_doc=doc, user_id=ME, team_names=names)
+    spec = eng.state.spec
+    t0 = datetime(2026, 9, 4, 20, 0, tzinfo=UTC)
+    for p in fx.picks[:7]:
+        n = p["pick_no"]
+        eng.on_pick(PickEvent("d", n, spec.round_of(n), p["draft_slot"], p["player_id"], None,
+                              t0 + timedelta(seconds=n), n, 1,
+                              {"position": p["metadata"]["position"]}))  # fmt: skip
+    out = state_payload(eng, fx.draft_id)
+    clock = out["clock"]
+    assert clock["on_the_clock"] == 8 and clock["on_the_clock_team_name"] == "Lazy Sleepers"
+    assert clock["pick_timer_s"] == 120
+    assert clock["pick_deadline"] == t0 + timedelta(seconds=7 + 120)
+    feed = out["recent_picks"]
+    assert [p["pick_no"] for p in feed] == [7, 6, 5, 4, 3, 2, 1]
+    assert feed[0]["slot"] == 7 and feed[0]["team_name"] == "Rivals"
+    assert feed[1]["team_name"] is None  # slot 6 has no draft_order entry
+    assert feed[0]["sleeper_id"] == fx.picks[6]["player_id"]
+    assert feed[0]["position"] == fx.picks[6]["metadata"]["position"]
+    assert set(feed[0]) == {"pick_no", "slot", "team_name", "sleeper_id", "name", "position"}
+    eng.on_pick(_ev(fx.picks[7], spec))
+    out = state_payload(eng, fx.draft_id)
+    feed = out["recent_picks"]
+    assert len(feed) == 8 and feed[0]["pick_no"] == 8 and feed[-1]["pick_no"] == 1
+    assert out["clock"]["on_the_clock_team_name"] is None  # slot 9: no user row
+
+
+def test_api_state_types_the_clock_and_feed(client: TestClient, fx: ReplayFixture) -> None:
+    assert client.post(f"/draft/{fx.draft_id}/start", json={"season": 2026}).status_code == 200
+    # the fixture's pick_timer arrives with the runner's first draft-doc read: wait for the
+    # replay to finish so the assertion doesn't race the thread (it did on CI)
+    client.app.state.draft_host.get(fx.draft_id).runner.join(30)
+    r = client.get(f"/draft/{fx.draft_id}/state?limit=1")
+    assert r.status_code == 200
+    body = r.json()
+    for key in ("on_the_clock_team_name", "pick_timer_s", "pick_deadline"):
+        assert key in body["clock"]
+    assert body["clock"]["pick_timer_s"] == 120  # the fixture's Sleeper doc
+    assert isinstance(body["recent_picks"], list) and len(body["recent_picks"]) <= 8
+    schema = client.get("/openapi.json").json()["components"]["schemas"]
+    assert "RecentPickOut" in schema
+    assert "pick_deadline" in schema["DraftClockOut"]["properties"]
+    assert schema["DraftStateOut"]["properties"]["recent_picks"]["items"]["$ref"].endswith(
+        "RecentPickOut"
+    )
+
+
+def test_fallback_page_ticks_the_countdown_and_shows_the_feed(fx: ReplayFixture) -> None:
+    from lazy_sleeper.draft.render import draft_page
+
+    html = draft_page(fx.draft_id, season=2026)
+    assert 'id="feed"' in html and 'id="cd"' in html
+    assert "pick_deadline" in html and "on_the_clock_team_name" in html and "recent_picks" in html
+    assert "setInterval(drawCountdown,1000)" in html

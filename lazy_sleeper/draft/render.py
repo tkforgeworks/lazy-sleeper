@@ -35,6 +35,8 @@ h1{font-size:16px;margin:0 0 6px}h1 small,small{color:#999;font-weight:normal}
 a{color:#93c5fd}
 .clock{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline;margin:4px 0}
 .clock b{font-size:18px}.turn{color:#fde047;font-weight:bold}
+.cd{font-variant-numeric:tabular-nums;color:#86efac}.cd.warn{color:#fde68a}.cd.hot{color:#f87171;font-weight:bold}
+.feed span{display:inline-block;margin:2px 10px 0 0;font-size:12px}.feed small{color:#999}
 .needs span{display:inline-block;margin:2px 6px 0 0;padding:0 6px;border-radius:3px;background:#222;
  border:1px solid #444;font-size:12px}.needs span.hot{border-color:#f59e0b;color:#fde68a}
 .filters button{margin:4px 4px 0 0;padding:6px 12px;min-height:36px;min-width:44px;border:1px solid #444;
@@ -68,16 +70,28 @@ function setStatus(t,cls){const e=$('#status');e.textContent=t;e.className='stat
 function setBanner(t){const b=$('#banner');b.classList.toggle('on',!!t);b.textContent=t||'';}
 function resetView(){lastSeq=-1;lastRun=null;}
 function pickRows(st){return st.rows.filter(r=>pos==='ALL'||r.position===pos).slice(0,LIMIT);}
+let deadline=null;   // LS-56: server-derived pick deadline; ticked locally, independent of seq
+function drawCountdown(){
+ const e=$('#cd');if(!e)return;
+ if(deadline==null){e.textContent='';e.className='';return;}
+ const s=Math.max(0,Math.round((deadline-Date.now())/1000));
+ e.textContent=`⏱ ${s}s`;e.className=s<=10?'cd hot':s<=20?'cd warn':'cd';
+}
 function drawClock(st){
  const c=st.clock,r=st.my_roster;
  const until=c.picks_until_my_turn==null?'?':c.picks_until_my_turn;
+ deadline=c.pick_deadline?Date.parse(c.pick_deadline):null;
  $('#clock').innerHTML=
   `<span>pick <b>${c.current_pick}</b>/${st.spec.total_picks}`+(c.round?` · R${c.round}`:'')+`</span>`+
-  `<span>on the clock: <b>${c.on_the_clock??'-'}</b></span>`+
+  `<span>on the clock: <b>${c.on_the_clock??'-'}</b>`+(c.on_the_clock_team_name?` ${esc(c.on_the_clock_team_name)}`:'')+` <span id="cd"></span></span>`+
   `<span>my slot: <b>${c.my_slot??'?'}</b></span>`+
   (c.complete?`<span class="turn">draft complete</span>`:
    c.my_turn?`<span class="turn">YOU ARE ON THE CLOCK</span>`:
    `<span>until my turn: <b>${until}</b>`+(c.my_next_pick?` (pick ${c.my_next_pick})`:'')+`</span>`);
+ drawCountdown();
+ const feed=st.recent_picks||[];
+ $('#feed').innerHTML=feed.length?`<small>last picks</small> `+feed.map(p=>
+  `<span>${p.pick_no}. ${esc(p.name||p.sleeper_id)} <small>${p.position||''}${p.team_name?' · '+esc(p.team_name):p.slot?' · slot '+p.slot:''}</small></span>`).join(''):'';
  if(r){const n=Object.entries(r.needs||{}).sort((a,b)=>b[1]-a[1]);
   const os=r.open_starters||{};
   $('#needs').innerHTML=`<small>my needs</small> `+n.map(([p,v])=>
@@ -151,7 +165,7 @@ document.querySelectorAll('.filters button[data-pos]').forEach(b=>b.onclick=()=>
  pos=b.dataset.pos;document.querySelectorAll('.filters button[data-pos]').forEach(x=>x.classList.toggle('on',x===b));tick();});
 $('#start').onclick=start;
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')tick();});
-tick();timer=setInterval(tick,EVERY);
+tick();timer=setInterval(tick,EVERY);setInterval(drawCountdown,1000);
 """
 
 POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
@@ -184,6 +198,7 @@ def draft_page(
         f'<a href="/board/config.html?draft_id={did}">tuning</a></small></h1>'
         '<div class="clock" id="clock">loading…</div>'
         '<div class="needs" id="needs"></div>'
+        '<div class="feed" id="feed"></div>'
         f'<div class="filters">{buttons} '
         '<button class="start" id="start" style="display:none">start draft runner</button></div>'
         '<div class="status" id="status">connecting…</div>'
