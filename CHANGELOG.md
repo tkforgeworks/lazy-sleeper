@@ -20,7 +20,7 @@ The six bugs from the 2026-08-26 architecture review of 0.1.0, all on the live-d
   request in flight at a time (LS-63).
 - **Mobile hardening ahead of the real-device pass** — table in its own scroll box, sticky header
   row, thumb-sized filter buttons, immediate poll on wake; firewall / network-profile / auto-lock
-  notes in the runbook. The on-phone verification checklist itself is still open (LS-67).
+  notes in the runbook; verified end-to-end on desktop Chrome and a phone over Wi-Fi (LS-67).
 
 ## v0.1.0 — draft-2026 (unreleased)
 
