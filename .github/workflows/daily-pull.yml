@@ -11,7 +11,7 @@ name: daily-pull
 
 on:
   schedule:
-    - cron: "0 10 * * *" # 06:00 ET (EDT); GitHub cron is best-effort, drift of minutes is normal
+    - cron: "23 9 * * *" # 05:23 ET (EDT); odd minute — on-the-hour crons are contended and drifted 4h (both 2026-09-02/03 runs landed ~14:00 UTC, inside a Supabase IO stall)
   workflow_dispatch:
     inputs:
       season:
@@ -40,6 +40,9 @@ jobs:
       SLEEPER_DRAFT_ID: ${{ secrets.SLEEPER_DRAFT_ID }}
       SLEEPER_USER_ID: ${{ secrets.SLEEPER_USER_ID }}
       SNAPSHOT_DIR: ./data/snapshots
+      # 30 s (the API default) is too tight for bulk loads when Supabase's nano compute is
+      # IO-starved — the 2026-09-03 run died on a QueryCanceled at exactly 30 s.
+      DB_STATEMENT_TIMEOUT_MS: "120000"
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -55,7 +58,17 @@ jobs:
       - name: Pull daily (players, season projections/ADP, ESPN, crosswalk)
         run: uv run lazy pull daily --season "${{ inputs.season || '2026' }}"
       - name: Load into core.*
-        run: uv run lazy load players && uv run lazy load crosswalk && uv run lazy load stats && uv run lazy load byes --season "${{ inputs.season || '2026' }}"
+        # Loads are idempotent upserts, so a retry after a transient DB stall is safe.
+        run: |
+          for attempt in 1 2 3; do
+            if uv run lazy load players && uv run lazy load crosswalk && uv run lazy load stats && uv run lazy load byes --season "${{ inputs.season || '2026' }}"; then
+              exit 0
+            fi
+            echo "::warning::load attempt $attempt failed; retrying in 60s"
+            sleep 60
+          done
+          echo "all load attempts failed"
+          exit 1
       - name: Freshness audit
         run: uv run lazy check freshness
       - name: Regenerate the draft board (derived.boards + CSV/HTML)

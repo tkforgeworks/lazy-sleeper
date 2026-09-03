@@ -7,6 +7,7 @@ import io
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -93,6 +94,7 @@ def load_players(
         "sleeper_id",
         (*_PLAYER_FIELDS, "snapshot_id", "updated_at"),
         batch,
+        guard_cols=_PLAYER_FIELDS,
     )
     return len(rows)
 
@@ -125,7 +127,8 @@ def load_crosswalk(
         )
     rows = _dedupe_by_pk(rows, "sleeper_id")
     cols = tuple(k for k in rows[0] if k != "sleeper_id") if rows else ()
-    _upsert(session, Crosswalk.__table__, rows, "sleeper_id", cols, batch)
+    guard = tuple(c for c in cols if c not in ("snapshot_id", "loaded_at"))
+    _upsert(session, Crosswalk.__table__, rows, "sleeper_id", cols, batch, guard_cols=guard)
     return len(rows)
 
 
@@ -144,6 +147,35 @@ def _filled(r: dict[str, Any]) -> int:
     return sum(1 for v in r.values() if v is not None)
 
 
+def _upsert_stmt(
+    table,
+    chunk: list[dict[str, Any]],
+    pk: str,
+    update_cols: tuple[str, ...],
+    guard_cols: tuple[str, ...] | None,
+):  # noqa: ANN001, ANN202
+    """INSERT … ON CONFLICT DO UPDATE, optionally guarded so unchanged rows aren't rewritten.
+
+    With ``guard_cols`` the UPDATE only fires when at least one of those columns actually
+    differs (``IS DISTINCT FROM`` — NULL-safe). Bookkeeping columns (``snapshot_id``,
+    ``updated_at``/``loaded_at``) stay out of the guard and out of the SET's effect on
+    untouched rows: without the guard the daily full-payload upsert rewrote every row +
+    index entry + WAL even on a no-change day, which is what starved Supabase's nano
+    compute during the 2026-09-03 IO stall. ``updated_at`` therefore now means "last
+    changed", not "last loaded".
+    """
+    stmt = insert(table).values(chunk)
+    kwargs: dict[str, Any] = {
+        "index_elements": [pk],
+        "set_": {c: getattr(stmt.excluded, c) for c in update_cols},
+    }
+    if guard_cols:
+        kwargs["where"] = or_(
+            *(table.c[c].is_distinct_from(getattr(stmt.excluded, c)) for c in guard_cols)
+        )
+    return stmt.on_conflict_do_update(**kwargs)
+
+
 def _upsert(
     session: Session,
     table,
@@ -151,12 +183,7 @@ def _upsert(
     pk: str,
     update_cols: tuple[str, ...],
     batch: int,
+    guard_cols: tuple[str, ...] | None = None,
 ) -> None:  # noqa: ANN001
     for i in range(0, len(rows), batch):
-        chunk = rows[i : i + batch]
-        stmt = insert(table).values(chunk)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[pk],
-            set_={c: getattr(stmt.excluded, c) for c in update_cols},
-        )
-        session.execute(stmt)
+        session.execute(_upsert_stmt(table, rows[i : i + batch], pk, update_cols, guard_cols))
