@@ -392,8 +392,22 @@ def load_stat_snapshot(
     *,
     thaw: bool = False,
 ) -> LoadResult:
-    """Dispatch one snapshot to the right transform and write. ``thaw`` bypasses the projection
-    freeze — archival rebuilds only, loading snapshots in pulled_at order."""
+    """Dispatch one snapshot to the right transform and write, then stamp ``loaded_at``.
+    ``thaw`` bypasses the projection freeze — archival rebuilds only, loading snapshots in
+    pulled_at order."""
+    result = _load_stat_snapshot(session, snapshot, payload, resolver, thaw=thaw)
+    snapshot.loaded_at = datetime.now(UTC)
+    return result
+
+
+def _load_stat_snapshot(
+    session: Session,
+    snapshot: Snapshot,
+    payload: bytes,
+    resolver: SleeperIdResolver | None,
+    *,
+    thaw: bool,
+) -> LoadResult:
     if snapshot.source == "sleeper" and snapshot.kind in _SLEEPER_KIND_CATEGORY:
         stat_rows, adp_rows = sleeper_stat_rows(payload, snapshot)
         p, a = write_stat_rows(session, stat_rows, pulled_at=snapshot.pulled_at, thaw=thaw)
@@ -456,12 +470,11 @@ def duplicate_scope_ids(snaps: Sequence[Any], loaded_ids: set[int]) -> set[int]:
 
 
 def loaded_snapshot_ids(session: Session) -> set[int]:
-    """Snapshots that have contributed rows to either table."""
-    ids = set(session.scalars(select(Projection.snapshot_id).distinct()))
-    ids |= set(session.scalars(select(Actual.snapshot_id).distinct()))
-    ids |= set(session.scalars(select(SnapCount.snapshot_id).distinct()))
-    ids |= set(session.scalars(select(ExpectedPoints.snapshot_id).distinct()))
-    return ids
+    """Snapshots `load_stat_snapshot` has already processed (``raw.snapshots.loaded_at``).
+
+    Row references in core.* are not the test: latest-wins projections and the freeze leave a
+    snapshot that changed nothing with no row pointing at it, and it would be re-loaded forever."""
+    return set(session.scalars(select(Snapshot.id).where(Snapshot.loaded_at.is_not(None))))
 
 
 STAT_KINDS = (

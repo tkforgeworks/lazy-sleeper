@@ -9,6 +9,7 @@ from lazy_sleeper.ingest.stat_loaders import (
     SleeperIdResolver,
     _split,
     espn_stat_rows,
+    load_stat_snapshot,
     normalize_name,
     sleeper_stat_rows,
 )
@@ -181,3 +182,26 @@ def test_espn_fixture_yields_both_projections_and_actuals(espn_kona_payload: byt
     rows = espn_stat_rows(espn_kona_payload, _snap("espn", "kona", 2025, None), SleeperIdResolver())
     proj, actual = _split(rows)
     assert proj and actual, "2025 kona carries both projections and actuals"
+
+
+class _Recorder:
+    """Stands in for a Session; swallows the upserts a loader would execute."""
+
+    def __init__(self) -> None:
+        self.stmts: list = []
+
+    def execute(self, stmt) -> None:  # noqa: ANN001
+        self.stmts.append(stmt)
+
+
+def test_load_stat_snapshot_stamps_loaded_at(sleeper_proj_payload: bytes) -> None:
+    """The stamp — not a core.* row reference — is what `lazy load stats` treats as "already
+    loaded": latest-wins projections and the freeze leave a no-change snapshot with no row
+    pointing at it, and it was re-downloaded and re-processed on every daily run."""
+    snap = _snap("sleeper", "projections_week", 2025, 1)
+    assert snap.loaded_at is None
+    session = _Recorder()
+    before = datetime.now(UTC)
+    r = load_stat_snapshot(session, snap, sleeper_proj_payload)  # type: ignore[arg-type]
+    assert r.projections > 0 and session.stmts
+    assert snap.loaded_at is not None and snap.loaded_at >= before

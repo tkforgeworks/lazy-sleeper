@@ -94,6 +94,10 @@ class SupabaseStorage:
 
     def download(self, path: str) -> bytes:
         resp = self._client.get(self._object_url(path))
+        # Missing object = HTTP 400 {"error": "not_found"} (see exists); surface it as the same
+        # error a missing local file raises so callers can skip the snapshot, not crash on a 400.
+        if resp.status_code in (400, 404) and "not_found" in resp.text:
+            raise FileNotFoundError(f"{self._bucket}/{path} is not in remote storage")
         resp.raise_for_status()
         return resp.content
 
@@ -115,13 +119,27 @@ def store_from_settings(settings) -> SnapshotStore:  # noqa: ANN001 — Settings
             settings.supabase_secret_key or "",
             settings.supabase_bucket,
         )
-    return SnapshotStore(settings.snapshot_dir, remote)
+    return SnapshotStore(
+        settings.snapshot_dir, remote, require_mirror=settings.snapshot_require_mirror
+    )
+
+
+class MirrorError(RuntimeError):
+    """The Storage upload failed and the store was told the local copy is not enough."""
 
 
 class SnapshotStore:
-    def __init__(self, root: Path, remote: RemoteStorage | None = None) -> None:
+    def __init__(
+        self, root: Path, remote: RemoteStorage | None = None, *, require_mirror: bool = False
+    ) -> None:
+        """``require_mirror``: on an ephemeral host the local archive dies with the process, so a
+        snapshot that could not be mirrored is discarded (file removed, ``MirrorError`` raised)
+        rather than registered — a raw.snapshots row with no file behind it poisons every later
+        load. Off by default: at home the local copy is authoritative and `lazy sync push`
+        catches the mirror up."""
         self._root = root
         self._remote = remote
+        self._require_mirror = require_mirror
 
     @property
     def root(self) -> Path:
@@ -181,7 +199,10 @@ class SnapshotStore:
         if self._remote is not None:
             try:
                 remote_path = self._remote.upload(rel, gz, "application/gzip")
-            except Exception:  # noqa: BLE001 — local copy is authoritative; remote is a mirror
+            except Exception as e:  # noqa: BLE001 — remote is a mirror unless require_mirror
+                if self._require_mirror:
+                    target.unlink(missing_ok=True)
+                    raise MirrorError(f"remote upload failed for {rel}: {e}") from e
                 log.exception("remote upload failed for %s (local copy kept)", rel)
 
         return SnapshotRecord(
