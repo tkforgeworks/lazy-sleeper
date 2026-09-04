@@ -63,7 +63,9 @@ the lockfile.
 - **Supabase Storage** bucket `raw-snapshots` mirrors the raw archive; the local `data/snapshots/` is a
   cache. `SnapshotStore.read` downloads any file it doesn't have, and `lazy sync pull` fetches the whole
   archive up front. `lazy sync push` uploads anything registered in `raw.snapshots` that the bucket lacks
-  (idempotent — the 2026-08-16 preseason vintage was pushed this way and is safe).
+  (idempotent — the 2026-08-16 preseason vintage was pushed this way and is safe). On an ephemeral host
+  set `SNAPSHOT_REQUIRE_MIRROR=true` (the daily-pull workflow does): a pull whose upload fails is then
+  discarded and the step fails, instead of registering a row whose only copy dies with the runner.
 - **`.env`** — never committed: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SLEEPER_*`.
 
 So a new machine is: clone → `uv sync` → `.env` → `lazy sync pull` (optional; things fetch on demand)

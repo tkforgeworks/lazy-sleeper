@@ -59,6 +59,8 @@ from lazy_sleeper.ingest.stat_loaders import (
     loaded_snapshot_ids,
 )
 
+log = logging.getLogger(__name__)
+
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 pull_app = typer.Typer(no_args_is_help=True)
 load_app = typer.Typer(no_args_is_help=True)
@@ -395,10 +397,19 @@ def load_stats_cmd(
         dupes = set() if reload else duplicate_scope_ids(snaps, already)
         resolver = SleeperIdResolver.from_session(s)
         tp = ta = tadp = tsn = tep = done = 0
+        unavailable: list[str] = []
         for snap in snaps:
             if snap.id in already or snap.id in dupes:
                 continue
-            r = load_stat_snapshot(s, snap, ctx.store.read(snap.storage_path), resolver, thaw=thaw)
+            try:
+                payload = ctx.store.read(snap.storage_path)
+            except FileNotFoundError as e:
+                # Registered but no file on disk or in Storage (e.g. a pull whose upload failed on
+                # an ephemeral runner). One bad row must not block the rest of the load.
+                log.warning("skipping snapshot %d: %s", snap.id, e)
+                unavailable.append(f"{snap.id} {snap.storage_path}")
+                continue
+            r = load_stat_snapshot(s, snap, payload, resolver, thaw=thaw)
             done += 1
             tp, ta, tadp = tp + r.projections, ta + r.actuals, tadp + r.adp
             tsn, tep = tsn + r.snap_counts, tep + r.expected_points
@@ -413,6 +424,8 @@ def load_stats_cmd(
         + (f"; {len(dupes)} duplicate-content snapshots skipped" if dupes else "")
         + (f"; {len(resolver.unresolved)} espn ids unresolved" if resolver.unresolved else "")
     )
+    for line in unavailable:
+        typer.echo(f"  WARNING file unavailable, not loaded: {line}")
 
 
 # --- serve -----------------------------------------------------------------

@@ -11,7 +11,7 @@ M0 bootstrap ✅ → M1 scoring engine + join spine ✅ (2026-08-17) → M2 benc
 M3 consensus draft board ✅ (2026-08-20) → M4 live draft companion → M5 ForgeModel (first thing to cut) → M7 in-season → M8 productionization.
 Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
 
-## Status (updated 2026-08-28 — refresh this block whenever a story merges)
+## Status (updated 2026-09-04 — refresh this block whenever a story merges)
 
 - **Done:** LS-10–15, 17–37 (PRs #1–#30). 296 tests, `ci` required on `main`. **M2 complete (2026-08-19). M3 complete 2026-08-20**
   (LS-26 baselines → LS-27 VORP → LS-28 tiers/cliffs → LS-29 flags → LS-30 persisted `/board`).
@@ -33,6 +33,18 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   0014; `ingest/byes.py`; ESPN `?view=proTeamSchedules_wl` via `EspnClient.pro_teams`,
   `espn_stats.TEAMS` id map; `lazy pull byes --season --load`, `lazy load byes`, in `pull daily`
   and the workflow's load step). **LS-42** (ForgeModel knobs) moved to be/0.2.0 with LS-40/41/43.
+- **Daily-pull hardening (2026-09-03/04, PRs #47 and #49):** PR #47 = guarded upserts (`IS DISTINCT FROM`
+  on data columns, so unchanged rows are not rewritten) + 3× load retry in the workflow + `DB_STATEMENT_
+  TIMEOUT_MS` 120 s, after Supabase's t3.nano burst credits ran dry (IO stalls, HTTP 544 from Storage).
+  PR #49 = the follow-on: the 9/2–9/3 Storage 544s left five `raw.snapshots` rows with no file behind
+  them (flipped to `valid=false` by hand) and the 9/4 load died on Storage's **400 `not_found`** for
+  them. Now `SupabaseStorage.download` maps that to `FileNotFoundError`, `lazy load stats` skips an
+  unavailable file with a warning instead of aborting, `SnapshotStore(require_mirror=)` /
+  `SNAPSHOT_REQUIRE_MIRROR=true` (set in the workflow) discards a snapshot whose upload fails and
+  fails the pull step, and **migration 0015 `raw.snapshots.loaded_at`** is the loader's
+  "already loaded" test (stamped by `load_stat_snapshot`) — `loaded_snapshot_ids` used to infer it
+  from `snapshot_id` references in core.*, which latest-wins + the freeze had broken, so ~40
+  snapshots were re-downloaded and re-processed every day (11-min load step).
 - **0.1.1 bug pass (2026-08-27/28, from the five-agent review of 0.1.0; fix version 0.1.1):**
   LS-62/64/65/66 = branch `draft-poll-resilience`, LS-63 (+LS-67 hardening) = `draft-page-hardening`.
   **Poller architecture changed:** `DraftPoller` only fetches (`SleeperPickSource` = the two

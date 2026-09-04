@@ -4,9 +4,10 @@ import gzip
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 
-from lazy_sleeper.ingest.snapshots import SnapshotKey, SnapshotStore
+from lazy_sleeper.ingest.snapshots import MirrorError, SnapshotKey, SnapshotStore, SupabaseStorage
 
 
 class FakeRemote:
@@ -84,6 +85,8 @@ class MemoryRemote:
         return path in self.objects
 
     def download(self, path: str) -> bytes:
+        if path not in self.objects:  # the real client's contract for a missing object
+            raise FileNotFoundError(f"bucket/{path} is not in remote storage")
         return self.objects[path]
 
 
@@ -101,7 +104,49 @@ def test_read_falls_back_to_remote_and_caches_locally(tmp_path: Path) -> None:
 
 def test_read_missing_everywhere_raises(tmp_path: Path) -> None:
     store = SnapshotStore(tmp_path, MemoryRemote())
-    with pytest.raises(KeyError):  # MemoryRemote.download on an unknown path
+    with pytest.raises(FileNotFoundError):
         store.read("sleeper/league/na/na/20260101T000000Z.json.gz")
     with pytest.raises(FileNotFoundError):
         SnapshotStore(tmp_path).read("sleeper/league/na/na/20260101T000000Z.json.gz")
+
+
+def test_require_mirror_discards_the_snapshot_when_upload_fails(tmp_path: Path) -> None:
+    """On an ephemeral runner a row with no file behind it poisons every later load."""
+    store = SnapshotStore(tmp_path, ExplodingRemote(), require_mirror=True)
+    with pytest.raises(MirrorError, match="supabase down"):
+        store.write(SnapshotKey("espn", "kona", 2026), b'{"players":[]}')
+    assert not list(tmp_path.rglob("*.gz"))
+
+
+def test_require_mirror_is_a_no_op_when_the_upload_succeeds(tmp_path: Path) -> None:
+    remote = FakeRemote()
+    store = SnapshotStore(tmp_path, remote, require_mirror=True)
+    rec = store.write(SnapshotKey("espn", "kona", 2026), b'{"players":[]}')
+    assert rec.remote_path == f"bucket/{rec.storage_path}" and remote.uploads
+
+
+def _storage(handler) -> SupabaseStorage:  # noqa: ANN001
+    s = SupabaseStorage("https://x.supabase.co", "sb_secret", "raw-snapshots")
+    s._client = httpx.Client(transport=httpx.MockTransport(handler))  # noqa: SLF001
+    return s
+
+
+def test_supabase_download_maps_not_found_400_to_file_not_found() -> None:
+    """Supabase answers a missing object with 400 {"error":"not_found"} — the 2026-09-04 daily
+    pull died on exactly this after two days of failed uploads."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400, json={"statusCode": "404", "error": "not_found", "message": "Object not found"}
+        )
+
+    with pytest.raises(FileNotFoundError, match="raw-snapshots/espn/kona"):
+        _storage(handler).download("espn/kona/2026/na/20260902T135815Z.json.gz")
+
+
+def test_supabase_download_other_errors_still_raise_http_status() -> None:
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(544, text="")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _storage(handler).download("espn/kona/2026/na/x.json.gz")

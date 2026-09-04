@@ -65,6 +65,10 @@ class Snapshot(Base):
     valid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     validation_notes: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB)  # endpoint, params, headers-lite
+    # Stamped by `lazy load stats` once this snapshot's rows have been written to core.*; the
+    # loader's "already loaded" test. (Row references in core.* are not a substitute — latest-wins
+    # projections and the freeze leave many loaded snapshots with no row pointing at them.)
+    loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Player(Base):

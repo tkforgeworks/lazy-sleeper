@@ -40,6 +40,9 @@ jobs:
       SLEEPER_DRAFT_ID: ${{ secrets.SLEEPER_DRAFT_ID }}
       SLEEPER_USER_ID: ${{ secrets.SLEEPER_USER_ID }}
       SNAPSHOT_DIR: ./data/snapshots
+      # The runner's archive dies with the job: a snapshot that cannot be mirrored to Storage
+      # must fail the pull here, not be registered with no file behind it (2026-09-02/03).
+      SNAPSHOT_REQUIRE_MIRROR: "true"
       # 30 s (the API default) is too tight for bulk loads when Supabase's nano compute is
       # IO-starved — the 2026-09-03 run died on a QueryCanceled at exactly 30 s.
       DB_STATEMENT_TIMEOUT_MS: "120000"

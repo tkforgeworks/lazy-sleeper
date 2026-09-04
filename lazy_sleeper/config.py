@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     supabase_secret_key: str | None = None  # sb_secret_... (legacy service_role also works)
     supabase_bucket: str = "raw-snapshots"
+    # True on ephemeral hosts (the daily-pull runner): a snapshot whose Storage upload fails is
+    # discarded and the pull raises, instead of registering a raw.snapshots row whose only copy
+    # dies with the runner (the 2026-09-02/03 outage left five such rows and broke every load).
+    snapshot_require_mirror: bool = False
 
     sleeper_league_id: str = "1392685475625443328"
     sleeper_draft_id: str = "1392685476523024384"
