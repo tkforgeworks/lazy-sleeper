@@ -33,10 +33,10 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   0014; `ingest/byes.py`; ESPN `?view=proTeamSchedules_wl` via `EspnClient.pro_teams`,
   `espn_stats.TEAMS` id map; `lazy pull byes --season --load`, `lazy load byes`, in `pull daily`
   and the workflow's load step). **LS-42** (ForgeModel knobs) moved to be/0.2.0 with LS-40/41/43.
-- **Daily-pull hardening (2026-09-03/04, PRs #47–#48):** PR #47 = guarded upserts (`IS DISTINCT FROM`
+- **Daily-pull hardening (2026-09-03/04, PRs #47 and #49):** PR #47 = guarded upserts (`IS DISTINCT FROM`
   on data columns, so unchanged rows are not rewritten) + 3× load retry in the workflow + `DB_STATEMENT_
   TIMEOUT_MS` 120 s, after Supabase's t3.nano burst credits ran dry (IO stalls, HTTP 544 from Storage).
-  PR #48 = the follow-on: the 9/2–9/3 Storage 544s left five `raw.snapshots` rows with no file behind
+  PR #49 = the follow-on: the 9/2–9/3 Storage 544s left five `raw.snapshots` rows with no file behind
   them (flipped to `valid=false` by hand) and the 9/4 load died on Storage's **400 `not_found`** for
   them. Now `SupabaseStorage.download` maps that to `FileNotFoundError`, `lazy load stats` skips an
   unavailable file with a warning instead of aborting, `SnapshotStore(require_mirror=)` /
