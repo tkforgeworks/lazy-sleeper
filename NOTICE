@@ -1,0 +1,27 @@
+lazy-sleeper
+Copyright 2026 Tim Klimpel (TK ForgeWorks)
+
+This repository is licensed under the Apache License, Version 2.0 (see the
+LICENSE file). The following exclusions apply to that grant.
+
+IMAGE ASSETS — ALL RIGHTS RESERVED
+
+Image files in this repository are NOT licensed under the Apache License.
+This covers every raster and vector image file, including but not limited to
+.svg, .png, .jpg, .jpeg, .gif, .webp, .ico, and .icns — logos, wordmarks,
+lockups, application icons, illustrations, and screenshots. They are
+Copyright Tim Klimpel (TK ForgeWorks), all rights reserved, and may not be
+reproduced, modified, or redistributed without written permission.
+
+Two exceptions:
+  1. A file, or a LICENSE/README in its containing directory, that states a
+     different license for that asset.
+  2. Third-party assets (icon sets, fonts, stock imagery) retain their own
+     licenses, which are stated where they are used.
+
+NAMES AND MARKS
+
+"TK ForgeWorks" and the forge/anvil mark are used to identify the origin of
+this work. As Section 6 of the Apache License states, no trademark license is
+granted. Forks and derivatives must not present themselves as TK ForgeWorks
+products.
