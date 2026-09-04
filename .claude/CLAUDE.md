@@ -45,6 +45,16 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   "already loaded" test (stamped by `load_stat_snapshot`) — `loaded_snapshot_ids` used to infer it
   from `snapshot_id` references in core.*, which latest-wins + the freeze had broken, so ~40
   snapshots were re-downloaded and re-processed every day (11-min load step).
+- **LS-75 Docker image (2026-09-04, PR #50):** `Dockerfile` (python:3.12-slim + pinned uv, `uv sync
+  --locked --no-dev`, non-root `app` uid 1000, `/app/data` volume, `/health` HEALTHCHECK, CMD
+  `lazy serve`) + `docker-compose.yml` `app` service (`env_file: .env`, `:8000`, `restart:
+  unless-stopped`, named volume `appdata`); the throwaway Postgres moved behind `--profile
+  local-db`. Migrations are explicit: `docker compose run --rm app alembic upgrade head`. Target =
+  homelab VM `dev-apps` 10.0.10.60 (Ansible checks the repo out to `/opt/apps/lazy-sleeper`,
+  templates `.env`, runs `docker compose up -d --build`). Smoke 2026-09-04 against Supabase: pages
+  200, 8/23 mock runner started in the container (board 680 rows, 51 ms recompute), 576 MB image.
+  **Open from the ticket:** the dev DB home (shared dev-pg vs bundled) — draft night runs on
+  Supabase regardless. README §"Running it in Docker".
 - **0.1.1 bug pass (2026-08-27/28, from the five-agent review of 0.1.0; fix version 0.1.1):**
   LS-62/64/65/66 = branch `draft-poll-resilience`, LS-63 (+LS-67 hardening) = `draft-page-hardening`.
   **Poller architecture changed:** `DraftPoller` only fetches (`SleeperPickSource` = the two

@@ -1,8 +1,34 @@
-# Local dev database. Schema is plain Postgres so the same migrations run on Supabase.
+# The backend as it runs on the dev-apps VM (LS-75): `docker compose up -d --build` builds the
+# image from this checkout and serves the API on :8000. Config comes from `.env` next to this
+# file (DATABASE_URL, SUPABASE_*, SLEEPER_*, MY_DRAFT_SLOT …) — never hardcode it here.
+#
+#   docker compose up -d --build                      # build + start the API
+#   docker compose run --rm app alembic upgrade head  # migrations are explicit, not on start
+#   docker compose run --rm app lazy check freshness  # any CLI command, same .env
+#   docker compose logs -f app
+#
+# The local throwaway Postgres is behind a profile so it does not start on the VM:
+#   docker compose --profile local-db up -d db         (port 5433; schema is plain Postgres, so
+#   the same migrations run here and on Supabase)
 services:
+  app:
+    build: .
+    image: lazy-sleeper:local
+    container_name: lazy-sleeper
+    env_file: .env
+    environment:
+      SNAPSHOT_DIR: /app/data/snapshots
+    ports:
+      - "8000:8000"
+    volumes:
+      - appdata:/app/data
+    restart: unless-stopped
+    stop_grace_period: 10s
+
   db:
     image: postgres:16-alpine
     container_name: lazy-sleeper-db
+    profiles: ["local-db"]
     environment:
       POSTGRES_USER: lazysleeper
       POSTGRES_PASSWORD: lazysleeper
@@ -11,6 +37,7 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U lazysleeper"]
       interval: 5s
@@ -18,4 +45,5 @@ services:
       retries: 10
 
 volumes:
+  appdata:
   pgdata:
