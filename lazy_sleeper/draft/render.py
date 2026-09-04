@@ -63,7 +63,9 @@ tr.t-odd td{background:#161616}tr.mine td{background:#1e3a8a}
 
 _JS = """
 const DID=__DID__,LIMIT=__LIMIT__,EVERY=__EVERY__;
-let pos='ALL',timer=null,lastSeq=-1,lastPos='ALL',lastRun=null,inflight=false,okSeen=null,okAt=0;
+const SLOW=Math.max(EVERY,15000);   // LS-77: page cadence while the runner idles or is stopped
+let pos='ALL',timer=null,pace=0,lastSeq=-1,lastPos='ALL',lastRun=null,inflight=false,okSeen=null,okAt=0;
+function setPace(ms){if(ms===pace)return;pace=ms;if(timer)clearInterval(timer);timer=setInterval(tick,ms);}
 const $=s=>document.querySelector(s);
 const num=(v,d=1)=>v==null?'-':Number(v).toFixed(d);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -149,11 +151,13 @@ async function tick(){
  try{
   const r=await fetch(`/draft/${DID}/state`,{cache:'no-store'});
   if(r.status===404){resetView();setStatus('draft not started on the server — press start','err');
-   setBanner('');$('#start').style.display='';$('#rows').innerHTML='';return;}
+   setBanner('');$('#start').style.display='';$('#rows').innerHTML='';setPace(SLOW);return;}
   if(!r.ok){setStatus('HTTP '+r.status,'err');return;}
   const st=await r.json();
   const run=(st.poller&&st.poller.started_at)||null;
   if(run!==lastRun){lastRun=run;lastSeq=-1;}   // a restarted runner is a fresh engine: redraw all
+  // nothing moves while the runner idles before the draft or is stopped: poll the API slowly too
+  setPace((st.poller&&st.poller.mode==='idle')||st.running===false?SLOW:EVERY);
   drawClock(st);drawHealth(st);
   if(st.recompute.seq>lastSeq||pos!==lastPos){lastSeq=st.recompute.seq;lastPos=pos;drawRows(st);}
  }catch(e){setStatus('fetch failed: '+e,'err');}
@@ -176,7 +180,7 @@ document.querySelectorAll('.filters button[data-pos]').forEach(b=>b.onclick=()=>
  pos=b.dataset.pos;document.querySelectorAll('.filters button[data-pos]').forEach(x=>x.classList.toggle('on',x===b));tick();});
 $('#start').onclick=start;$('#stop').onclick=stop;
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')tick();});
-tick();timer=setInterval(tick,EVERY);setInterval(drawCountdown,1000);
+tick();setPace(EVERY);setInterval(drawCountdown,1000);
 """
 
 POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")

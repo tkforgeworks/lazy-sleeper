@@ -184,3 +184,5 @@ def test_page_has_a_stop_button_wired_to_the_stop_route() -> None:
     html = draft_page("d1", season=2026)
     assert 'id="stop"' in html and "/draft/${DID}/stop" in html
     assert "idle until" in html  # the status line names the idle mode
+    # the page itself backs off to SLOW while the runner idles or is stopped
+    assert "const SLOW=Math.max(EVERY,15000)" in html and "setPace(" in html
