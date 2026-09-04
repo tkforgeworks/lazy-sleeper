@@ -197,6 +197,11 @@ One league-wide pick for the feed (most recent first).
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `interval_s` | number | yes |  |
+| `mode` | string | yes |  |
+| `idle_poll_s` | number | yes |  |
+| `next_check_at` | string | null | yes |  |
+| `idle_until` | string | null | yes |  |
+| `start_time` | string | null | yes |  |
 | `status` | string | null | yes |  |
 | `expected_picks` | integer | null | yes |  |
 | `started_at` | string | null | yes |  |

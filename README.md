@@ -396,6 +396,11 @@ recompute sequence, so a stalled or dead poller is visible within a few seconds.
    `.env` and restart the API if it stays `?`). Status line colours: grey = healthy, **yellow** =
    the DB writer is behind (advice unaffected), **red** = polls failing / stale / poller stopped;
    a red banner = runner died, recompute failed, or Sleeper unreachable for 3+ polls.
+   Started hours early? The runner **idles** while the draft is `pre_draft` and its start is more
+   than 30 min away (`DRAFT_IDLE_BEFORE_START_MIN`; 0 = never): the status line reads
+   `idle until 7:30 PM (draft 8:00 PM) · doc every 60s` and no picks are polled until then
+   (LS-77). **stop draft runner** next to the filters ends the runner from the page
+   (`POST /draft/{id}/stop`); start brings it back, state restored from the DB.
 5. Draft. **YOU ARE ON THE CLOCK** in yellow = your turn; top row is the recommendation
    (`score` = VORP − what you'd lose by waiting + need bonus; `surv` = chance he survives to your next
    pick; `RUN n` / `CLIFF` tags). Position buttons filter. Tune mid-draft from the **tuning** link:

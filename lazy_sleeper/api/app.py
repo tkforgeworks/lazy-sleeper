@@ -160,6 +160,11 @@ class PersistOut(BaseModel):
 
 class PollerOut(BaseModel):
     interval_s: float
+    mode: str  # "polling" (picks every interval_s) | "idle" (LS-77: doc every idle_poll_s)
+    idle_poll_s: float
+    next_check_at: datetime | None  # idle: when the next draft-doc read is due
+    idle_until: datetime | None  # idle: when pick polling resumes (start_time - the idle window)
+    start_time: datetime | None  # the draft's scheduled start, from Sleeper's doc
     status: str | None
     expected_picks: int | None
     started_at: datetime | None

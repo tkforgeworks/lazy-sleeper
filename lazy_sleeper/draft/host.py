@@ -340,6 +340,11 @@ class DraftHost:
         p = run.runner.poller
         payload["poller"] = {
             "interval_s": p.interval_s,
+            "mode": p.mode,
+            "idle_poll_s": p.idle_poll_s,
+            "next_check_at": p.next_check_at,
+            "idle_until": p.idle_until() if p.mode == "idle" else None,
+            "start_time": p.start_time,
             "status": p.status,
             "expected_picks": p.expected_picks,
             "started_at": run.started_at,
@@ -498,6 +503,8 @@ class DbDraftFactory:
             draft_id,
             interval_s=self.interval_s,
             max_backoff_s=self.max_backoff_s,
+            idle_before_start_s=60.0 * self._settings.draft_idle_before_start_min,
+            idle_poll_s=self._settings.draft_idle_poll_s,
         )
 
     def host(self) -> DraftHost:
