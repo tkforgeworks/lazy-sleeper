@@ -466,6 +466,7 @@ def serve(
     import uvicorn
 
     from lazy_sleeper.api.app import create_app
+    from lazy_sleeper.api.logconfig import uvicorn_log_config
 
     settings = get_settings()
     lan = _lan_ips() if host in ("0.0.0.0", "") else [host]
@@ -491,6 +492,8 @@ def serve(
         port=port,
         log_level="warning" if quiet else "info",
         access_log=not quiet,
+        # timestamped access lines, /health probes dropped (reading the night's log back)
+        log_config=uvicorn_log_config(quiet=quiet),
         # LS-70: a request stuck in a slow handler must not hold Ctrl-C hostage; the lifespan
         # shutdown then stops the draft runners (≤ 5 s) — well inside 10 s all told
         timeout_graceful_shutdown=4,
