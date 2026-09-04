@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # the poller's own capped backoff owns the retrying.
     draft_http_timeout_s: float = 5.0
     draft_max_backoff_s: float = 15.0
+    # LS-77: a runner started early idles (draft doc every draft_idle_poll_s, no pick polls)
+    # until the doc's start_time is this close; 0 = never idle
+    draft_idle_before_start_min: float = 30.0
+    draft_idle_poll_s: float = 60.0
 
     # The DB pool (LS-69): Supavisor drops idle sockets silently and Windows then takes ~15 min
     # of TCP retransmits to notice, during which every DB-touching request blocks. Recycle

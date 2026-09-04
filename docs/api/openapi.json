@@ -901,6 +901,22 @@
             "title": "Failures In A Row",
             "type": "integer"
           },
+          "idle_poll_s": {
+            "title": "Idle Poll S",
+            "type": "number"
+          },
+          "idle_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idle Until"
+          },
           "interval_s": {
             "title": "Interval S",
             "type": "number"
@@ -940,6 +956,22 @@
             ],
             "title": "Last Poll At"
           },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "next_check_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check At"
+          },
           "persist": {
             "$ref": "#/components/schemas/PersistOut"
           },
@@ -957,6 +989,18 @@
               }
             ],
             "title": "Runner Error"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
           },
           "started_at": {
             "anyOf": [
@@ -996,6 +1040,11 @@
         },
         "required": [
           "interval_s",
+          "mode",
+          "idle_poll_s",
+          "next_check_at",
+          "idle_until",
+          "start_time",
           "status",
           "expected_picks",
           "started_at",

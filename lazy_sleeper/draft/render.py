@@ -43,6 +43,7 @@ a{color:#93c5fd}
  background:#222;color:#ddd;border-radius:4px;cursor:pointer;font-size:14px}
 .filters button.on{background:#3b82f6;color:#fff}
 .filters button.start{background:#16a34a;color:#fff;border-color:#16a34a}
+.filters button.stop{background:#7f1d1d;color:#fff;border-color:#7f1d1d}
 .status{font-size:12px;color:#999;margin-top:4px}.status.err{color:#fca5a5}.status.warn{color:#fde68a}
 .banner{background:#7f1d1d;color:#fecaca;padding:6px 14px;display:none;flex:none}.banner.on{display:block}
 .wrap{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch}
@@ -105,10 +106,13 @@ function drawHealth(st){
  const p=st.poller||{},w=p.persist||{},rc=st.recompute,c=st.clock,now=Date.now();
  if(p.last_ok_at&&p.last_ok_at!==okSeen){okSeen=p.last_ok_at;okAt=now;}
  const age=okSeen?Math.round((now-okAt)/1000):null;   // client clock only: no skew with the server
- const iv=p.interval_s||EVERY/1000;
+ const idle=p.mode==='idle';
+ const iv=(idle?p.idle_poll_s:p.interval_s)||EVERY/1000;   // LS-77: idle re-reads the doc slowly
  const parts=[],cls=[];
  parts.push(rc.seq?`recompute #${rc.seq} at ${new Date(rc.computed_at).toLocaleTimeString()} (${rc.elapsed_ms} ms)`:'board loaded, no recompute yet');
- parts.push(`poll ${iv}s`+(age==null?'':` · last ok ${age}s ago`));
+ if(idle){const st0=p.start_time?new Date(p.start_time):null,wake=p.idle_until?new Date(p.idle_until):null;
+  parts.push(`idle until ${wake?wake.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'?'}`+(st0?` (draft ${st0.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})})`:'')+` · doc every ${iv}s`+(age==null?'':` · last ok ${age}s ago`));}
+ else parts.push(`poll ${iv}s`+(age==null?'':` · last ok ${age}s ago`));
  parts.push(`${st.board.available} available of ${st.board.rows}`);
  if(p.status)parts.push(`draft ${p.status}`);
  if(p.failures_in_a_row>0){parts.push(`poll failing ×${p.failures_in_a_row}: ${p.last_error||'?'}`);cls.push('err');}
@@ -121,6 +125,7 @@ function drawHealth(st){
   rc.error?`last recompute failed: ${rc.error} — showing previous advice`:
   p.failures_in_a_row>=3?`Sleeper unreachable (${p.failures_in_a_row} polls: ${p.last_error||'?'}) — advice frozen until it answers`:'');
  $('#start').style.display=st.running===false&&!c.complete?'':'none';
+ $('#stop').style.display=st.running!==false&&!c.complete?'':'none';
 }
 function drawRows(st){
  const rows=pickRows(st);
@@ -161,9 +166,15 @@ async function start(){
   if(!r.ok)setStatus('start failed: HTTP '+r.status,'err');}catch(e){setStatus('start failed: '+e,'err');}
  tick();
 }
+async function stop(){
+ setStatus('stopping the draft runner…');
+ try{const r=await fetch(`/draft/${DID}/stop`,{method:'POST'});
+  if(!r.ok)setStatus('stop failed: HTTP '+r.status,'err');}catch(e){setStatus('stop failed: '+e,'err');}
+ tick();
+}
 document.querySelectorAll('.filters button[data-pos]').forEach(b=>b.onclick=()=>{
  pos=b.dataset.pos;document.querySelectorAll('.filters button[data-pos]').forEach(x=>x.classList.toggle('on',x===b));tick();});
-$('#start').onclick=start;
+$('#start').onclick=start;$('#stop').onclick=stop;
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')tick();});
 tick();timer=setInterval(tick,EVERY);setInterval(drawCountdown,1000);
 """
@@ -200,7 +211,8 @@ def draft_page(
         '<div class="needs" id="needs"></div>'
         '<div class="feed" id="feed"></div>'
         f'<div class="filters">{buttons} '
-        '<button class="start" id="start" style="display:none">start draft runner</button></div>'
+        '<button class="start" id="start" style="display:none">start draft runner</button>'
+        '<button class="stop" id="stop" style="display:none">stop draft runner</button></div>'
         '<div class="status" id="status">connecting…</div>'
         "</header>"
         '<div class="banner" id="banner"></div>'

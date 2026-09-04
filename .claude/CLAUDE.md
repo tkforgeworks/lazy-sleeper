@@ -45,6 +45,18 @@ Product/architecture spec: `docs/draft-companion-execution-plan_20260816.md`.
   "already loaded" test (stamped by `load_stat_snapshot`) — `loaded_snapshot_ids` used to infer it
   from `snapshot_id` references in core.*, which latest-wins + the freeze had broken, so ~40
   snapshots were re-downloaded and re-processed every day (11-min load step).
+- **LS-77 idle runner + stop button (2026-09-04, PR #51):** `DraftPoller(idle_before_start_s=,
+  idle_poll_s=, wall=)` — after the first poll seeds state, while the doc says `pre_draft` with a
+  `start_time` further away than the window, `run()` does `_idle_tick` (wait ≤ `idle_poll_s`,
+  never past the wake time, then re-read the doc only) instead of `poll_once`; drops back to
+  polling when the window opens, the status changes, or the doc loses its start time (never idle
+  blind). Off by default; `Settings.draft_idle_before_start_min` 30 / `draft_idle_poll_s` 60 via
+  `DbDraftFactory.poller`. `/state.poller` gained `mode` (`polling`|`idle`), `idle_poll_s`,
+  `next_check_at`, `idle_until`, `start_time` (`PollerOut`; docs/api regenerated). Page: red
+  **stop draft runner** button → `POST /draft/{id}/stop`, status line `idle until HH:MM (draft
+  HH:MM) · doc every 60s`, staleness threshold uses the effective cadence. Tests
+  `tests/test_draft_idle.py` (scripted source + injected wall clock). Real `/stop` interrupts the
+  idle wait immediately (it waits on the stop event).
 - **LS-75 Docker image (2026-09-04, PR #50):** `Dockerfile` (python:3.12-slim + pinned uv, `uv sync
   --locked --no-dev`, non-root `app` uid 1000, `/app/data` volume, `/health` HEALTHCHECK, CMD
   `lazy serve`) + `docker-compose.yml` `app` service (`env_file: .env`, `:8000`, `restart:

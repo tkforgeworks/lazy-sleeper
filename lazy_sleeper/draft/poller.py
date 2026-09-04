@@ -43,7 +43,7 @@ import time
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -56,6 +56,7 @@ from lazy_sleeper.ingest.validate import validate_json_any
 log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_S = 2.0  # Sleeper tolerates this; 5 s + page refresh felt slow on the clock
+DEFAULT_IDLE_POLL_S = 60.0  # LS-77: draft-doc re-read cadence while idling before the draft
 DEFAULT_MAX_BACKOFF_S = (
     15.0  # LS-65: worst-case blind window after a blip, well inside a pick clock
 )
@@ -464,10 +465,18 @@ class DraftPoller:
         draft_refresh_every: int = 10,
         persister: Persister | None = None,
         flush_timeout_s: float = 10.0,
+        idle_before_start_s: float = 0.0,
+        idle_poll_s: float = DEFAULT_IDLE_POLL_S,
         sleep: Callable[[float], None] | None = None,
         rng: Callable[[], float] = random.random,
         clock: Callable[[], float] = time.monotonic,
+        wall: Callable[[], datetime] | None = None,
     ) -> None:
+        """``idle_before_start_s`` > 0 enables the idle mode (LS-77): while the doc says
+        ``pre_draft`` and its ``start_time`` is further away than that, the loop re-reads the
+        draft doc every ``idle_poll_s`` instead of polling picks every ``interval_s``. Off by
+        default (replays, tests); production sets it from ``Settings``. ``wall`` is the wall
+        clock the start time is compared against (``clock`` stays monotonic, for cadence)."""
         self._source = source
         self._sink = sink
         self.draft_id = draft_id
@@ -476,9 +485,17 @@ class DraftPoller:
         self.draft_refresh_every = max(1, draft_refresh_every)
         self.persist = persister if persister is not None else Persister(sink)
         self.flush_timeout_s = flush_timeout_s
+        self.idle_before_start_s = idle_before_start_s
+        self.idle_poll_s = idle_poll_s
         self._sleep = sleep
         self._rng = rng
         self._clock = clock
+        self._wall = wall or (lambda: datetime.now(UTC))
+        # LS-77: "polling" (picks every interval_s) or "idle" (doc every idle_poll_s until the
+        # draft's start is within idle_before_start_s); next_check_at = when the next read is due
+        self.mode = "polling"
+        self.next_check_at: datetime | None = None
+        self.idle_ticks = 0
         self._seq = 0
         self._last_sha: str | None = None
         self._last_count = 0
@@ -512,6 +529,26 @@ class DraftPoller:
         order = (self.draft or {}).get("draft_order") or {}
         v = order.get(str(user_id)) if user_id else None
         return int(v) if v is not None else None
+
+    @property
+    def start_time(self) -> datetime | None:
+        """The draft's scheduled start from the doc (Sleeper: ms epoch), if it has one."""
+        ms = (self.draft or {}).get("start_time")
+        return datetime.fromtimestamp(int(ms) / 1000, tz=UTC) if ms else None
+
+    def idle_until(self) -> datetime | None:
+        """When the loop may resume pick polling, or None if it should be polling now.
+
+        Idle only while the doc says ``pre_draft`` *and* carries a ``start_time`` further away
+        than ``idle_before_start_s``; a doc without a start time is never idled on (never idle
+        blind), and any other status means the room is live or over."""
+        if self.idle_before_start_s <= 0 or self.status != "pre_draft":
+            return None
+        start = self.start_time
+        if start is None:
+            return None
+        wake = start - timedelta(seconds=self.idle_before_start_s)
+        return wake if self._wall() < wake else None
 
     # -- one iteration ------------------------------------------------------------
     def poll_once(self) -> PollResult:
@@ -625,6 +662,14 @@ class DraftPoller:
         not_found = 0
         try:
             while not stop.is_set():
+                # LS-77: after the first poll has seeded state, sit out the wait before the draft
+                wake = self.idle_until() if self.draft is not None else None
+                if wake is not None:
+                    self._idle_tick(wake, wait)
+                    continue
+                if self.mode == "idle":
+                    self.mode, self.next_check_at = "polling", None
+                    log.info("idle over; polling picks every %.1fs", self.interval_s)
                 self.last_poll_at = datetime.now(UTC)
                 t0 = self._clock()
                 try:
@@ -712,6 +757,36 @@ class DraftPoller:
             self.persist.close(self.flush_timeout_s)
         return summary
 
+    def _idle_tick(self, wake: datetime, wait: Callable[[float], Any]) -> None:
+        """One idle iteration: wait (≤ ``idle_poll_s``, never past ``wake``), then re-read the
+        draft doc so a moved start time or an early ``drafting`` flip is noticed. Stop events
+        interrupt the wait, so ``/stop`` is immediate while idle."""
+        now = self._wall()
+        delay = max(0.0, min(self.idle_poll_s, (wake - now).total_seconds()))
+        if self.mode != "idle":
+            log.info(
+                "draft %s starts %s; idling (doc every %.0fs) until %s",
+                self.draft_id,
+                self.start_time.isoformat() if self.start_time else "?",
+                self.idle_poll_s,
+                wake.isoformat(),
+            )
+        self.mode = "idle"
+        self.next_check_at = now + timedelta(seconds=delay)
+        self.idle_ticks += 1
+        wait(delay)
+        self.last_poll_at = datetime.now(UTC)
+        try:
+            self._refresh_draft()
+        except Exception as exc:  # noqa: BLE001 — a failed doc read just means try again later
+            self.failures_in_a_row += 1
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            log.warning("idle draft-doc read failed (%s)", self.last_error)
+            return
+        self.failures_in_a_row = 0
+        self.last_error = None
+        self.last_ok_at = datetime.now(UTC)
+
     def backoff(self, failures: int) -> float:
         """interval × 2^failures, capped at ``max_backoff_s`` (15 s by default — a dead network
         must not blind the draft for a pick clock), with up to +25 % jitter so retries don't
@@ -721,6 +796,7 @@ class DraftPoller:
 
 
 __all__ = [
+    "DEFAULT_IDLE_POLL_S",
     "DEFAULT_INTERVAL_S",
     "DEFAULT_MAX_BACKOFF_S",
     "DbPickSink",
