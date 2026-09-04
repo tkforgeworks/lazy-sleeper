@@ -407,6 +407,31 @@ recompute sequence, so a stalled or dead poller is visible within a few seconds.
 7. Afterwards: `lazy draft fixture --draft-id <id> --since <UTC start>` writes
    `tests/fixtures/mock_draft_<id>.json.gz` — the night as an offline replay (below).
 
+### Running it in Docker (the dev-apps VM, LS-75)
+
+The image is the same code and the same `.env`; only the host changes. On `dev-apps`
+(10.0.10.60) the homelab Ansible role checks this repo out to `/opt/apps/lazy-sleeper`, templates
+`.env` from the vault, and runs the first command below. From a fresh checkout on any Docker host:
+
+```bash
+cp .env.example .env                                 # DATABASE_URL (Supabase), SUPABASE_*, SLEEPER_*
+docker compose up -d --build                         # build + serve on :8000, restarts with the VM
+docker compose run --rm app alembic upgrade head     # migrations are explicit — never on start
+docker compose run --rm app lazy check freshness     # any CLI command runs the same way
+docker compose logs -f app                           # uvicorn + draft runner logs
+```
+
+Then the draft-night pages are `http://<vm-ip>:8000/draft.html`, `/board.html`,
+`/board/config.html` — the "LAN" URLs the container prints at start are its own bridge address,
+so use the VM's. `/health` is the compose healthcheck. `data/` (snapshot cache, `draft_poll_*.log`,
+board exports) lives in the `appdata` named volume: `docker compose cp app:/app/data/logs ./logs`
+to pull the night's poll log out. The throwaway local Postgres is behind a profile so it does not
+start on the VM (`docker compose --profile local-db up -d db`).
+
+Reaching it from the phone means the phone's Wi-Fi VLAN must be allowed to :8000 on VLAN 10 (or
+go through the Tailscale subnet router) — test that days before, exactly like the Windows firewall
+prompt above.
+
 ### Draft-day runbook (2026-09-04, 8 PM ET)
 
 **Morning:**
